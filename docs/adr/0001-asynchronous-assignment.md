@@ -64,13 +64,11 @@ Worker loop:
 
   1. reuse check   → valid audit for site_id with
                      available_to_client_at ≤ valid_until AND ≤ deadline?  → attach, done
-  2. in-flight     → audit for site_id not yet occurred but publishing
-                     after this request's ceiling?  → pull it earlier, attach
-  3. otherwise     → earliest free date in window, least loaded auditor
+  2. otherwise     → earliest free date in window, least loaded auditor
                      window floored by previous_audit.valid_until + 1 day
-  4. unique violation → next candidate
-  5. no candidate     → stays PENDING, awaits a capacity event
-  6. deadline passed  → UNSCHEDULABLE + event
+  3. unique violation → next candidate
+  4. no candidate     → stays PENDING, awaits a capacity event
+  5. deadline passed  → UNSCHEDULABLE + event
 ```
 
 Three mechanisms, each doing exactly one job:
@@ -123,11 +121,10 @@ the derived deadline rather than `requested_at`.
 auditor capacity, so it is the first branch in the loop. Under duplicate demand this is the single
 largest reduction in auditor workload the system can make.
 
-**Serialisation also protects the site calendar.** Non-overlapping validity per site (A7) is
-enforced by an exclusion constraint, but *choosing* between attaching, pulling an in-flight audit
-earlier and creating a new one is a read-then-decide sequence. Running assignments serially means
-that decision is never made on a stale view — a second, independent reason for the single writer
-beyond fairness.
+**Serialisation also protects the site calendar.** Choosing between attaching to an existing audit
+and creating a new one is a read-then-decide sequence, and the floor at the previous audit's expiry
+is computed from what the read returned. Running assignments serially means that decision is never
+made on a stale view — a second, independent reason for the single writer beyond fairness.
 
 **The API contract changes shape.** The client receives `PENDING` and must poll
 `GET /audit-requests/{id}` or consume `AuditScheduled`. A real cost of the decision, documented in

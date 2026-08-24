@@ -1,11 +1,10 @@
 # 01 · Domain model
 
-The business objects carry their own behaviour: an audit knows how to compute its publication date
-and whether it may be moved, rather than a service computing it on its behalf. Persistence is a
-separate concern.
+Scope is an MVP: a sound initial structure with real functionality, not a finished product. Where a
+case was identified but deliberately not built, it is recorded in section 6 rather than half-solved.
 
-The organising question of this document is not *what are the entities* but **where each rule is
-checked**.
+The business objects carry their own behaviour — an audit knows how to compute its publication date
+— rather than a service computing it on their behalf. Persistence is a separate concern.
 
 ---
 
@@ -15,10 +14,10 @@ checked**.
 |---|---|
 | **Client** | Buys the service. Requests audits of its suppliers' sites. |
 | **Supplier** | Pharmaceutical supplier. Owns one or more sites. |
-| **Site** | The physical facility that gets audited. **Audits are facts about sites, never about clients.** |
-| **Auditor** | Performs the on-site audit. Occupied for `audit_duration_days`. |
+| **Site** | The facility that gets audited. **Audits are facts about sites, never about clients.** |
+| **Auditor** | Performs the on-site audit. |
 | **Audit request** | A client's commitment: "audit this site under my subscription terms". |
-| **Audit** | The on-site visit and the resulting report. Shared by every request attached to it. |
+| **Audit** | The visit and the resulting report. Shared by every request attached to it. |
 | **Delivery window** | The interval, derived from the subscription level, in which a report must reach a client. |
 | **Attach** | Bind a request to an audit — existing or newly scheduled. |
 | **Access date** | When a specific client may read the report. Distinct from the audit's publication date. |
@@ -31,56 +30,76 @@ Two distinctions carry most of the design:
 
 ---
 
-## 2 · Entities, and what each one owns
+## 2 · Entities
 
-| Entity | Owns | References by id |
+**This system writes two tables and reads the rest.**
+
+| Written here | Owns | References by id |
 |---|---|---|
 | `AuditRequest` | its delivery window, its frozen subscription level, its status | `client_id`, `site_id`, `audit_id` |
-| `Audit` | its date, its durations, its validity period, its report, its status | `site_id`, `auditor_id` |
-| `Auditor` | identity, active flag | — |
-| `Client` | subscription level, valid-until date | — |
+| `Audit` | its date, its durations, `valid_until`, its report, its status | `site_id`, `auditor_id` |
 
-`Site` and `Supplier` are reference data: nothing in this scope modifies them.
+| Read here | Holds |
+|---|---|
+| `Client` | `subscription_level_code`, `subscription_valid_until` |
+| `Auditor` | identity, active flag |
+| `Site` | identity, `supplier_id` |
+| `Supplier` | identity, name |
 
-What an entity "owns" matters because it defines **what gets loaded and saved together**. Everything
-outside that boundary is reached by query, using an id, not by walking an object graph.
+The four read-only tables are ordinary classes with objects; they simply have no state machine, no
+invariants to protect in this scope, and no endpoints that modify them. Who maintains them is
+outside the exercise.
+
+What an entity owns defines **what gets loaded and saved together**. Anything outside that boundary
+is reached by query, using an id.
+
+**A request stores `site_id`, not `(site_id, supplier_id)`.** The supplier is reachable through the
+site, and storing both creates a pair that can contradict itself. Copying derivable data is only
+justified when the point is to **freeze** it — which is exactly why `subscription_level` *is* copied
+onto the request. Site ownership is not that case.
+
+### The tier parameters are an enum in code, not a table
+
+Essentials, Advanced and Premium carry `minWindowDays` and `maxWaitDays` as constants in the code,
+not as rows.
+
+**A subscription level is not data the system stores; it is a rule the system applies.** What
+Essentials *means* — four weeks minimum, four months maximum — is a contractual commitment. As a
+table, someone can change a delivery commitment with an `UPDATE` in production and no review. As an
+enum, changing it takes a commit, a review and a deployment, which is exactly the friction a change
+of that kind deserves in a regulated domain.
+
+The join is not the argument either way: the parameters are read once, when the request is accepted,
+because the derived dates are frozen from that moment (A6).
+
+**When it becomes a table:** as soon as levels are negotiated per client. Then the terms genuinely
+are data, and the enum becomes the set of defaults.
 
 ### The audit does not hold its requests
 
-A list of requests inside `Audit` would grow without bound, would be loaded on every assignment, and
-would force two things that change independently to be written together. Given that an audit can be
-shared by many clients, that list is exactly the part most likely to grow.
-
-The link is navigated the other way: a request knows its audit; finding the requests of an audit is
-a query.
+That list grows without bound — and it is precisely the part that grows, since an audit is shared
+between clients. It would also force two things that change independently to be written together.
+The link is navigated the other way: a request knows its audit.
 
 ### The auditor does not hold a calendar
 
-Tempting, and wrong. Availability is the absence of an audit row for `(auditor_id, date)` — a
-question about a set of audits, not a property of the auditor. Putting the calendar inside `Auditor`
-would mean loading every future audit to answer "is this date free", and every assignment in the
-system would then have to load and lock the same object.
-
-**Consequence:** `Auditor` holds almost nothing. That is a signal the boundary is in the right
-place, not that something is missing.
+Availability is the absence of an audit row for `(auditor_id, date)` — a question about a set of
+audits, not a property of the auditor. A calendar inside `Auditor` would mean loading every future
+audit to answer "is this date free", and every assignment in the system would load and lock the same
+object. `Auditor` holding almost nothing is a signal the boundary is right.
 
 ### Rejected · One table for request and audit
 
-Collapsing the two removes a join and a lifecycle, and fails on reuse. Once several clients share an
-audit, `requested_at`, the frozen level, the deadline and the access date are per client, while
-auditor and dates are shared. Either you keep one row per client and nominate one as "the real one"
-— two things in disguise — or one row per site plus a table linking clients with their own dates,
-which is `audit_request` reached the long way round.
+Collapsing the two removes a join and fails on reuse. Once several clients share an audit,
+`requested_at`, the frozen level, the deadline and the access date are per client, while auditor and
+dates are shared. Either you keep one row per client and nominate one as "the real one" — two things
+in disguise — or one row per site plus a table linking clients with their own dates, which is
+`audit_request` reached the long way round.
 
-It also breaks three things:
-
-- **States diverge.** A request can be `UNSCHEDULABLE` while the site's audit is published and
-  healthy. One row cannot hold both facts.
-- **Pulling an audit forward loses its inputs.** Checking that no ceiling is breached needs the
-  per-client ceilings.
-- **Constraints weaken.** A pending row has no auditor and no date, so `UNIQUE (auditor_id,
-  audit_date)` degrades into a partial index over rows that happen to have values, and stops reading
-  as a business rule.
+It also breaks two things worth naming: a request can be `UNSCHEDULABLE` while the site's audit is
+published and healthy, and one row cannot hold both facts; and a pending row has no auditor or date,
+so `UNIQUE (auditor_id, audit_date)` degrades into an index over rows that happen to have values and
+stops reading as a business rule.
 
 ---
 
@@ -88,8 +107,7 @@ It also breaks three things:
 
 **The distinction:** a rule about a single row can be checked in code, before saving. A rule about
 **the relationship between several rows** cannot — the object in memory does not know what the other
-rows contain, and by the time it finds out, another transaction may have changed them. Those rules
-are enforced by the database.
+rows contain, and by the time it finds out, another transaction may have changed them.
 
 ### Checked in code
 
@@ -99,8 +117,8 @@ are enforced by the database.
 | `latest_audit_date = requested_at + max_wait − processing_duration` | `AuditRequest` |
 | A request only attaches to an audit satisfying both reuse conditions (A7) | `AuditRequest` |
 | `published_at = audit_date + processing_duration_days` | `Audit` |
-| `validity_period = [published_at, published_at + 1 year)` | `Audit` |
-| An audit may only be moved earlier while it has not started | `Audit` |
+| `valid_until = published_at + 1 year` | `Audit` |
+| A new audit is floored at the previous one's expiry (A7) | `Audit` |
 | State transitions start from specific states, never from a wildcard | both |
 
 ### Enforced by the database
@@ -109,44 +127,39 @@ are enforced by the database.
 |---|---|---|
 | One auditor audits at most one site per day | Concerns every audit row for that auditor | `UNIQUE (auditor_id, audit_date)` |
 | At most one audit in flight per site | Concerns every audit row for that site | partial unique index |
-| Validity periods for a site never overlap | Same | `EXCLUDE USING gist` |
 
-Checking "is this date free" in code is a read followed by a write, and under concurrency the gap
-between the two is precisely where double booking happens. No amount of care in the object closes
-that gap; only the database can, because only the database sees both transactions.
+Two constraints, both ordinary unique indexes. Checking "is this date free" in code is a read
+followed by a write, and under concurrency the gap between them is exactly where double booking
+happens. No amount of care in the object closes that gap; only the database sees both transactions.
 
 **Deliberate duplication.** Code still checks availability before picking a candidate — not for
-correctness, which the constraint owns, but so the ordinary case produces a clear error instead of a
+correctness, which the constraint owns, but so the ordinary case yields a clear error instead of a
 constraint violation surfacing from the driver. One layer is ergonomics, the other is correctness.
-Conflating them is how systems end up with neither.
 
 ---
 
-## 4 · Small types that carry the calculations
+## 4 · `DeliveryWindow`
 
-Rather than passing raw dates and strings around, four small types hold the arithmetic so it exists
-in one place:
+The one calculation that earns its own type:
 
 ```
-SubscriptionLevel   code, minWindowDays, maxWaitDays
-                    → deliveryWindowFor(requestedAt) : DeliveryWindow
+SubscriptionLevel (an enum) ──→ DeliveryWindow (an object)
 
 DeliveryWindow      earliestAuditDate, latestAuditDate
                     → contains(date) : boolean
+                    → two flat columns in the table, one object in code
                     → frozen at acceptance, never re-derived
-
-AuditSchedule       auditDate, auditDurationDays, processingDurationDays
-                    → publishedAt() : Date
-                    → occupies() : DateRange
-
-ValidityPeriod      from, until
-                    → covers(date) : boolean
-                    → null until publication
 ```
 
-`DeliveryWindow` carries the whole of A1. The translation from "report no earlier than four weeks"
-into an interval of admissible audit dates happens once, in one place, and everything else only asks
-whether a date falls inside it. If that rule is ever wrong, there is exactly one place to fix.
+It carries the whole of A1. The translation from "report no earlier than four weeks" into an
+interval of admissible audit dates happens once, in one place, and everything else only asks whether
+a date falls inside it. If that rule is ever wrong, there is exactly one place to fix.
+
+Everything else is a single line of arithmetic on `Audit` and does not need a type of its own.
+**`valid_until` is a plain date, not a range.** A range type earned its place only while it fed a
+range constraint; with that gone, every question asked is "is it still valid" and "when does it
+expire", and the start of the period is already `published_at`. A range that is never used as a
+range is an expensive column.
 
 ---
 
@@ -158,89 +171,118 @@ possible.
 ### Audit request
 
 ```
-   (accepted) → PENDING ──── attach ────→ ATTACHED ────→ FULFILLED
-                   │                   (audit assigned)   (report readable
-                   │                                       by this client)
-                   └── deadline passed ─→ UNSCHEDULABLE
+   (accepted) → PENDING ───── attach ─────→ ATTACHED ─────→ FULFILLED
+                   │                           │
+                   ├── deadline passed ──→ UNSCHEDULABLE
+                   │                           │
+                   └────── cancelled ──────────┴──────→ CANCELLED
 ```
 
 | State | Meaning |
 |---|---|
 | `PENDING` | Commitment accepted, no audit yet. The row is the queue. |
 | `ATTACHED` | Bound to an audit — newly scheduled or reused. |
-| `FULFILLED` | The audit is published **and** `available_to_client_at` has passed. |
+| `FULFILLED` | The audit is published **and** `available_to_client_at` has passed. Terminal. |
 | `UNSCHEDULABLE` | `latest_audit_date` passed with no placement. Terminal, emits an event. |
+| `CANCELLED` | Withdrawn by the client. Terminal. |
+
+`FULFILLED` does not lead to `CANCELLED`: once the report has been made available there is nothing
+left to withdraw.
 
 ### Audit
 
 ```
-   SCHEDULED ──→ IN_PROGRESS ──→ PROCESSING ──→ PUBLISHED
-   (auditor +     (auditor        (report being    (validity
-    date set)      on site)        produced)        period opens)
+   SCHEDULED ──→ IN_PROGRESS ──→ PUBLISHED
+        │
+        └── last attached request cancelled ──→ CANCELLED
 ```
 
-### The two are not in step, and that is the point
+`IN_PROGRESS` spans from the audit date to publication. The visit and the report processing are not
+separate states: nothing in the system asks which of the two is currently elapsing, and the dates
+already say it.
+
+**Cancelling an audit is only reachable from `SCHEDULED`, and it is unconditional.** When the last
+attached request is withdrawn the audit is cancelled — no notice threshold below which it would be
+kept, because an audit is never worth performing without demand merely to hold it in stock. No
+configurable margin, no arbitrary number to defend.
+
+The date is released as an `AuditSlotReleased` event, which wakes the worker for other pending
+requests (A4).
+
+**"Too late to reassign" needs no rule.** A slot freed for today cannot be taken by anyone: the
+earliest admissible audit date is tomorrow even for Premium (A1), so the event finds no candidate
+and the day is simply lost. The window arithmetic already excludes the case.
+
+**Demand is required to begin, not to exist.** Once the auditor has been on site the cost is spent,
+so the audit proceeds to publication even with no attached request and serves whoever asks for that
+site next.
+
+**The request does not command the audit, it announces itself.** Cancellation raises an in-process
+domain event, `AuditRequestCancelled`, handled in the same transaction; the audit decides for itself
+whether it should follow. The two state machines stay unaware of each other, and no broker is
+involved in something that happens inside one transaction.
+
+**The reason is recorded where it varies.** The client's motive is stored on the cancelled request.
+The audit's own cause is constant in this scope — no remaining demand — so a column for it would
+hold a single repeated value.
+
+### The two machines are not in step, and that is the point
 
 A request can be `ATTACHED` to an audit already `PUBLISHED` and still not be fulfilled: an Essentials
 client who requests today cannot read a report published yesterday until their 28-day window
-elapses. Fulfilment is therefore a function of two things — the audit's state and a date — not a
-consequence of the audit's transition.
+elapses.
 
 ```
 fulfilled  ⟺  audit.status = PUBLISHED  ∧  today ≥ available_to_client_at
 ```
 
-**Where the transition is triggered.** Not by a timer per request. Publication emits `AuditPublished`,
-which fulfils every attached request whose access date has already passed; the daily sweep fulfils
-the rest as their dates arrive. Same principle as A4: react to the event that changes the outcome,
-and keep a sweep for what only time resolves.
+Publication emits `AuditPublished`, which fulfils every attached request whose access date has
+already passed; the daily sweep fulfils the rest as their dates arrive. Same principle as A4: react
+to the event that changes the outcome, and keep a sweep for what only time resolves.
 
 ---
 
-## 6 · How far an audit may be pulled forward
+## 6 · Identified and deliberately not built
 
-A7 establishes that an audit which has not happened yet can be moved earlier to satisfy a tighter
-ceiling. Three bounds, and one of them is a business decision rather than a technical one:
+Each of these is a case the design surfaced and answered on paper. Building them is an evolution,
+not a correction.
 
-| Bound | Source |
-|---|---|
-| Not before `previous_audit.valid_until + 1 day` | Validity periods must not overlap |
-| Only while `status = SCHEDULED` | Once the auditor is on site, the date is a fact |
-| Not within `minimum_notice_days` of today | Business courtesy toward the auditor |
+### Pulling an in-flight audit forward
 
-The third has no basis in the statement, so it is modelled like the durations in A1: a configurable
-value with a stated default (3 days), not a magic number buried in a condition. Making it explicit
-turns "we don't move an auditor's visit at the last minute" from hidden behaviour into a rule
-someone can change.
+An audit is scheduled to publish on 01/12/2026. A Premium client requests on 01/09/2026 with a
+ceiling of 01/10/2026. The existing audit publishes too late for them, and a second audit would
+overlap the site's validity (A7). Today that request stays `PENDING` and eventually expires as
+`UNSCHEDULABLE`.
 
-If no earlier date satisfies all three, the audit stays where it is and the request that prompted
-the move remains `PENDING` under A4 — a capacity problem, not an error.
+**The fix, when it is built:** move the in-flight audit earlier rather than create a second one. It
+is safe in one direction only — `available_to_client_at = max(published_at, requested_at +
+min_window)`, so an earlier publication either leaves each attached client's access date unchanged
+or improves it, and no ceiling can be breached. Moving later would push every attached request out
+at once.
 
----
+The rule underneath: **while the audit has not occurred its date is negotiable; once it has occurred
+its validity is fixed.**
 
-## 7 · The report
+Not built because it adds a third branch to the assignment worker and a minimum-notice policy toward
+the auditor, in exchange for an edge case. The failure mode meanwhile is visible, not silent: the
+request expires with an event.
 
-**Decision.** The report is part of `Audit`. In this scope it is `published_at` plus a document
-reference; it is not a separate entity.
+### Auditor eligibility
 
-**Why.** It has no lifecycle of its own: produced by one audit, published once, meaningless detached
-from it. Separating it would create a second thing to load, save and keep consistent, in exchange
-for nothing.
+Any auditor can audit any site (A3). No interface with a single pass-through implementation is
+introduced for this — that would be structure without content. When qualifications appear, they
+enter as a filter applied before selection, and the concurrency design is untouched: a smaller pool
+does not change how competition for a date is arbitrated.
 
-**If findings, versions or signatures appear**, the report becomes a separate row that still belongs
-to its audit and is still written in the same transaction. The boundary does not move; only the
-shape of what sits inside it.
+### Report structure
 
----
+The report is `published_at` plus a document reference on `Audit`. It has no lifecycle of its own:
+produced by one audit, published once, meaningless detached from it. If findings, versions or
+signatures appear, it becomes a separate row that still belongs to its audit and is still written in
+the same transaction.
 
-## 8 · Where the selection rules live
+### Weighted distribution
 
-| Component | Responsibility |
-|---|---|
-| `AuditorEligibility` | Narrows the candidate pool. Currently returns every auditor (A3). |
-| `AuditorSelectionPolicy` | Chooses among eligible candidates. Currently least loaded, ties by id. |
-| `AuditAssignment` | The use case: reuse → pull forward → schedule. Orchestrates; holds no rules of its own. |
-
-Eligibility and selection are separate on purpose. *Who may* is a business rule; *who should* is a
-policy. Keeping them apart is what lets A3 be lifted without touching distribution, and lets
-distribution be reweighted without touching eligibility.
+"Proportionally" is read as least loaded by audit count (A2). Selection sits behind
+`AuditorSelectionPolicy`, the one interface kept, because it is the single point where an answer to
+that question could change without anything else moving.

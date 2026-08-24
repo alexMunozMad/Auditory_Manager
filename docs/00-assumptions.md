@@ -55,15 +55,10 @@ three consecutive audits for different sites is already satisfied by this key �
 dates, three rows, no conflict.
 
 **If `audit_duration_days` becomes variable**, a slot stops being a point and becomes a range. An
-audit starting on D with duration 3 occupies D, D+1, D+2, and a second row starting on D+1 does
-*not* violate uniqueness on the start date while genuinely overlapping. The constraint must become:
-
-```sql
-EXCLUDE USING gist (auditor_id WITH =, audit_period WITH &&)
-```
-
-Uniqueness protects points; ranges need exclusion. Selection logic changes from "is this date free"
-to "is this range free". Nothing else moves.
+audit starting on D with duration 3 occupies D, D+1 and D+2, and a second row starting on D+1 does
+*not* violate uniqueness on the start date while genuinely overlapping. Uniqueness on a single date
+stops being sufficient, and the selection logic changes from "is this date free" to "is this range
+free". Nothing else in the design moves.
 
 ---
 
@@ -133,10 +128,20 @@ keeping.
 
 ---
 
-## A5 · Cancellation and rescheduling are out of scope, with a designed path in
+## A5 · Request cancellation is modelled; rescheduling is not
 
-**Decision.** The modelled lifecycle ends at publication. State transitions originate from specific
-states rather than a wildcard, so adding `CANCELLED` is additive.
+**Decision.** Cancelling a *request* is in scope: it is a terminal state, and when the last request
+attached to a not-yet-started audit is withdrawn, the audit is cancelled and its date released.
+Everything that requires **moving an audit that others depend on** — auditor unavailability,
+processing delays, reassignment — stays out.
+
+**Why the line falls there.** Cancelling a request removes a commitment and frees capacity: nothing
+downstream has to be recomputed. Rescheduling changes a date other clients have already planned
+around, which drags in fairness recalculation and compensation of events already emitted. One is a
+terminal transition; the other is a second complete problem.
+
+State transitions originate from specific states rather than a wildcard, so the remaining cases stay
+additive.
 
 **Intended policy**, sketched in `07-out-of-scope.md`:
 
@@ -165,15 +170,19 @@ The change stays local, precisely because the level is already frozen onto the r
 
 ### No temporal subscription table
 
-The level lives on the client as `subscription_level_code` + `subscription_valid_until`, alongside a
-small lookup table holding the tier parameters:
+The level lives on the client as `subscription_level_code` + `subscription_valid_until`. The tier
+parameters are an enum in code, not a table:
 
-```sql
-subscription_level (code, min_window_days, max_wait_days)
-  ESSENTIALS   28   120
-  ADVANCED     21    90
-  PREMIUM       0    30
 ```
+ESSENTIALS   minWindow 28   maxWait 120
+ADVANCED     minWindow 21   maxWait  90
+PREMIUM      minWindow  0   maxWait  30
+```
+
+**A subscription level is not data the system stores; it is a rule it applies.** As a table, a
+delivery commitment could be changed with an `UPDATE` in production and no review. As an enum, it
+takes a commit, a review and a deployment — the friction such a change deserves in a regulated
+domain. When levels are negotiated per client they become data, and the enum becomes the defaults.
 
 A table of dated subscription periods would be a **third copy of history that already exists twice**:
 the level under which each request was accepted is frozen on the request itself, and every change of
@@ -181,10 +190,10 @@ level is recorded as a `SubscriptionChanged` event in the audit trail (A8). Thre
 fact is three chances for them to disagree.
 
 **Derived dates are frozen, not recomputed.** `latest_audit_date` and `available_to_client_at` are
-stored as resolved dates on the request, never calculated at query time from the lookup table.
-Otherwise adjusting a tier parameter would retroactively change commitments made months earlier.
-With the dates frozen, the lookup table supplies defaults for new requests and the past becomes
-immutable by construction.
+stored as resolved dates on the request, never recalculated at query time from the tier parameters.
+Otherwise adjusting a parameter would retroactively change commitments made months earlier. With the
+dates frozen, the parameters supply defaults for new requests and the past becomes immutable by
+construction.
 
 **Known limitation.** `subscription_valid_until` is mutable: renewing overwrites the previous value.
 Acceptable, because acceptance of a request is itself the evidence that validation passed at that
@@ -262,47 +271,43 @@ earliest_publication = max( requested_at + min_window , previous_audit.valid_unt
 audit_date           = earliest_publication − processing_duration_days
 ```
 
-Two constraints follow, and both are enforced in the engine:
+One constraint enforces this, and it is an ordinary partial unique index:
 
 ```sql
--- at most one audit in flight per site
 CREATE UNIQUE INDEX ON audit (site_id)
-    WHERE status IN ('SCHEDULED', 'IN_PROGRESS', 'PROCESSING');
-
--- published validity periods never overlap
-ALTER TABLE audit ADD CONSTRAINT audit_validity_no_overlap
-    EXCLUDE USING gist (site_id WITH =, validity_period WITH &&);
+    WHERE status IN ('SCHEDULED', 'IN_PROGRESS');
 ```
 
-Note the symmetry with A1: *one auditor cannot hold two overlapping audits* and *one site cannot
-hold two overlapping validity periods* are the same shape of rule, and both are expressed with the
-same Postgres mechanism. Uniqueness protects points, exclusion protects ranges.
+**Why no range constraint over the validity periods.** Two published validity periods for a site can
+only overlap by one of two routes: two audits were in flight at the same time, or the floor above
+was computed wrongly. The index rules out the first — the actual race, two workers creating an audit
+for the same site at once. The second is a single line of arithmetic in a single place, and a line
+of arithmetic is covered by a test, not by a constraint.
 
-### An audit that has not happened yet can be pulled forward
+A range-exclusion constraint would therefore be defending against a bug rather than against
+concurrency, which does not justify its cost.
+
+**Cost accepted.** If assignment is ever parallelised per site, the floor calculation loses its
+backstop. The partial index still prevents concurrent in-flight audits, so the exposure is limited
+to arithmetic — but it is recorded here rather than discovered later.
+
+### Known limitation · a tight ceiling against an in-flight audit
 
 The non-overlap rule collides with the contractual ceiling in one case. An audit is scheduled to
-publish on 01/12/2026, valid until 01/12/2027. A Premium client requests on 01/09/2026, with a
-ceiling of 01/10/2026. The existing audit publishes too late to serve them, and a second audit
-would overlap.
+publish on 01/12/2026. A Premium client requests on 01/09/2026 with a ceiling of 01/10/2026. The
+existing audit publishes too late to serve them, and a second audit would overlap.
 
-Resolution: **the in-flight audit is moved earlier rather than a second audit created.** Its new
-date is the one satisfying the tightest ceiling among all requests attached to it and pending for
-that site — the same rule already applied when scheduling from scratch, extended to an audit that
-exists but has not yet occurred.
+**In this scope the request stays `PENDING` and expires as `UNSCHEDULABLE`.** The failure is visible
+and emits an event; it is not silent.
 
-This is safe in one direction only, and the asymmetry is the reason it works:
+**The fix, when built:** move the in-flight audit earlier instead of creating a second one. Safe in
+one direction only — an earlier publication either leaves each attached client's access date
+unchanged or improves it, so no ceiling can be breached, whereas moving later pushes every attached
+request out at once. The rule underneath: *while the audit has not occurred its date is negotiable;
+once it has occurred its validity is fixed.*
 
-| Direction | Effect on attached requests |
-|---|---|
-| Earlier | `available_to_client_at = max(published_at, requested_at + min_window)` either stays or improves. No ceiling can be breached. |
-| Later | Access dates move out for every attached request at once. Tighter ceilings may breach. |
-
-The lifecycle therefore splits into two regimes: **while the audit has not occurred its date is
-negotiable; once it has occurred its validity is fixed.** Pulling forward is bounded below by the
-previous audit's expiry and by auditor availability on the earlier date.
-
-Cost accepted: an earlier publication also expires earlier, slightly shortening the reuse window
-for future clients. Serving a committed ceiling outranks extending inventory for hypothetical demand.
+Deferred because it adds a third branch to the assignment worker and a minimum-notice policy toward
+the auditor, in exchange for an edge case. See `01-domain-model.md` §6.
 
 ### Audits are demand-driven, never speculative
 
