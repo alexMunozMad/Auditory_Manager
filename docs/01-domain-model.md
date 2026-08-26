@@ -171,7 +171,7 @@ possible.
 ### Audit request
 
 ```
-   (accepted) → PENDING ───── attach ─────→ ATTACHED ─────→ FULFILLED
+   (accepted) → PENDING ───── attach ─────→ SCHEDULED ────→ FULFILLED
                    │                           │
                    ├── deadline passed ──→ UNSCHEDULABLE
                    │                           │
@@ -181,7 +181,7 @@ possible.
 | State | Meaning |
 |---|---|
 | `PENDING` | Commitment accepted, no audit yet. The row is the queue. |
-| `ATTACHED` | Bound to an audit — newly scheduled or reused. |
+| `SCHEDULED` | Bound to an audit — newly scheduled or reused. The client's report has a committed date. |
 | `FULFILLED` | The audit is published **and** `available_to_client_at` has passed. Terminal. |
 | `UNSCHEDULABLE` | `latest_audit_date` passed with no placement. Terminal, emits an event. |
 | `CANCELLED` | Withdrawn by the client. Terminal. |
@@ -194,17 +194,25 @@ left to withdraw.
 ```
    SCHEDULED ──→ IN_PROGRESS ──→ PUBLISHED
         │
-        └── last attached request cancelled ──→ CANCELLED
+        └── last attached request cancelled ──→ DISCARDED
 ```
+
+**Why `DISCARDED` and not `CANCELLED`.** Nobody cancels an audit. A client cancels *their request*;
+the audit is simply left without demand and dropped. Naming the audit's terminal state after an actor
+that does not exist invites exactly the confusion of reading the diagram and asking who cancelled it.
+Two different events deserve two different names in the trail.
 
 `IN_PROGRESS` spans from the audit date to publication. The visit and the report processing are not
 separate states: nothing in the system asks which of the two is currently elapsing, and the dates
 already say it.
 
-**Cancelling an audit is only reachable from `SCHEDULED`, and it is unconditional.** When the last
-attached request is withdrawn the audit is cancelled — no notice threshold below which it would be
-kept, because an audit is never worth performing without demand merely to hold it in stock. No
+**Discarding is only reachable from `SCHEDULED`, and it is unconditional.** When the last attached
+request is withdrawn the audit is discarded — no notice threshold below which it would be kept,
+because an audit is never worth performing without demand merely to hold it in stock. No
 configurable margin, no arbitrary number to defend.
+
+Something has to record that the visit will not happen: otherwise the auditor stays booked for a day
+nobody wants and the slot is never released. Deleting the row is not an option (A8).
 
 The date is released as an `AuditSlotReleased` event, which wakes the worker for other pending
 requests (A4).
@@ -226,9 +234,20 @@ involved in something that happens inside one transaction.
 The audit's own cause is constant in this scope — no remaining demand — so a column for it would
 hold a single repeated value.
 
+### One vocabulary, two entities
+
+`SCHEDULED` appears in both machines and that is not a collision. On the audit it means the visit has
+a date; on the request it means *this client's report* has a committed date — true whether the audit
+was just scheduled or was already published and the client is waiting for its access date.
+
+There is deliberately **no second set of names for the API**. One word per concept across the whole
+system: support reading the database and a client reading the response see the same state, and there
+is no translation table to keep in step. Confidentiality is protected by never exposing audit
+identifiers or co-requesters (§03), not by renaming states.
+
 ### The two machines are not in step, and that is the point
 
-A request can be `ATTACHED` to an audit already `PUBLISHED` and still not be fulfilled: an Essentials
+A request can be `SCHEDULED` against an audit already `PUBLISHED` and still not be fulfilled: an Essentials
 client who requests today cannot read a report published yesterday until their 28-day window
 elapses.
 

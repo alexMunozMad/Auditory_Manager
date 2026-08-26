@@ -1,0 +1,69 @@
+classDiagram
+
+    class supplier {
+        +uuid id PK
+        +text name
+    }
+
+    class site {
+        +uuid id PK
+        +uuid supplier_id FK
+        +text name
+    }
+
+    class client {
+        +uuid id PK
+        +text name
+        +text subscription_level_code
+        +date subscription_valid_until
+    }
+
+    class auditor {
+        +uuid id PK
+        +text name
+        +boolean active
+    }
+
+    class audit_request {
+        +uuid id PK
+        +uuid client_id FK
+        +uuid site_id FK
+        +uuid audit_id FK
+        +timestamptz requested_at
+        +text subscription_level_code
+        +date earliest_audit_date
+        +date latest_audit_date
+        +date available_to_client_at
+        +text status
+        +text cancellation_reason
+    }
+
+    class audit {
+        +uuid id PK
+        +uuid site_id FK
+        +uuid auditor_id FK
+        +date audit_date
+        +int audit_duration_days
+        +int processing_duration_days
+        +date published_at
+        +date valid_until
+        +text report_uri
+        +text status
+    }
+
+    class outbox_event {
+        +uuid id PK
+        +text aggregate_type
+        +uuid aggregate_id
+        +text event_type
+        +jsonb payload
+        +timestamptz occurred_at
+        +timestamptz published_at
+    }
+
+    supplier "1" -- "*" site : owns
+    site "1" -- "*" audit_request : targeted_by
+    site "1" -- "*" audit : audited_by
+    client "1" -- "*" audit_request : raises
+    auditor "1" -- "*" audit : performs
+    audit "0..1" -- "*" audit_request : fulfils_N_clients
