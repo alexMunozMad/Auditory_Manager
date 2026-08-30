@@ -127,8 +127,8 @@ is computed from what the read returned. Running assignments serially means that
 made on a stale view — a second, independent reason for the single writer beyond fairness.
 
 **The API contract changes shape.** The client receives `PENDING` and must poll
-`GET /audit-requests/{id}` or consume `AuditScheduled`. A real cost of the decision, documented in
-the endpoint contract.
+`GET /audit-requests/{id}` or consume `AuditRequestScheduled` (§04). A real cost of the decision,
+documented in the endpoint contract.
 
 ## Testing implication
 

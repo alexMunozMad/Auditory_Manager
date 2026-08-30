@@ -1,24 +1,30 @@
 # 02 · Data model
 
-PostgreSQL. Two tables are written by this system, four are read. Every index below is justified
-against a concrete query; none is speculative.
+PostgreSQL. The scheduling domain writes `audit_request`, `audit` and an outbox; `supplier` and
+`site` are a catalogue it inserts into but never changes; `client` and `auditor` are read-only. The
+notification component (§04) owns one more table (§8). Every index below is justified against a
+concrete query; none is speculative.
 
 ---
 
-## 1 · Read-only tables
+## 1 · Catalogue and read-only tables
 
-Maintained outside this scope. No endpoints here modify them.
+`client` and `auditor` are maintained outside this scope; no endpoint here modifies them.
+`supplier` and `site` are a **catalogue this system writes** — `POST /v1/sites` inserts into both
+(§03, A10) — but never updates or deletes.
 
 ```sql
 CREATE TABLE supplier (
     id    uuid PRIMARY KEY,
-    name  text NOT NULL
+    name  text NOT NULL,
+    CONSTRAINT supplier_name_unique UNIQUE (name)
 );
 
 CREATE TABLE site (
     id           uuid PRIMARY KEY,
     supplier_id  uuid NOT NULL REFERENCES supplier(id) ON DELETE RESTRICT,
-    name         text NOT NULL
+    name         text NOT NULL,
+    CONSTRAINT site_name_unique UNIQUE (name)
 );
 
 CREATE TABLE auditor (
@@ -30,6 +36,7 @@ CREATE TABLE auditor (
 CREATE TABLE client (
     id                        uuid PRIMARY KEY,
     name                      text NOT NULL,
+    contact_email             text NOT NULL,
     subscription_level_code   text NOT NULL,
     subscription_valid_until  date NOT NULL,
     CONSTRAINT client_level_valid
@@ -37,8 +44,19 @@ CREATE TABLE client (
 );
 ```
 
-The level is a code, not a foreign key: the tier parameters are an enum in code (§01 model). The
-`CHECK` keeps the column honest without creating a table whose only purpose is to be joined.
+**`supplier.name` and `site.name` are unique.** A supplier is identified by its name, so
+`POST /v1/sites` resolves `{ supplier: { name } }` to the existing row rather than duplicating it. A
+site name is treated as a globally unique facility identifier: a site belongs to exactly one
+supplier and is never re-parented, so creating an existing site name under a different supplier is a
+`409` (§03). *(Assumption: site names are facility-unique. If two suppliers can each hold a site of
+the same name, this becomes `UNIQUE (supplier_id, name)` with an immutable `supplier_id`.)*
+
+**`contact_email` on `client`.** The notification component (§04) needs a destination for the
+assignment and report-ready emails. It is part of the client record, maintained with the rest of it;
+this system only reads it.
+
+The subscription level is a code, not a foreign key: the tier parameters are an enum in code (§01).
+The `CHECK` keeps the column honest without a table whose only purpose is to be joined.
 
 ---
 
@@ -390,3 +408,28 @@ others caught up. Fairness needs rows counted within a date range, which is a qu
 It would also be a second copy of a fact already recorded in the audit rows, and the contention point
 that the single-writer worker exists to avoid (ADR 0001). The index it needs already exists:
 `UNIQUE (auditor_id, audit_date)` serves both the constraint and this aggregate.
+
+---
+
+## 8 · Outside the scheduling domain
+
+The notification component (§04) keeps its own table for delivery idempotency. It is not part of the
+scheduling model — listed here only so the schema is complete.
+
+```sql
+CREATE TABLE notification_dispatch (
+    event_id    uuid        PRIMARY KEY,   -- the outbox event that triggered the send
+    channel     text        NOT NULL,      -- 'email'
+    recipient   text        NOT NULL,
+    status      text        NOT NULL,      -- CLAIMED | SENT | FAILED
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    sent_at     timestamptz,
+    CONSTRAINT notification_status_valid
+        CHECK (status IN ('CLAIMED', 'SENT', 'FAILED'))
+);
+```
+
+`event_id` as primary key **is** the concurrency control: N consumer instances race with
+`INSERT … ON CONFLICT (event_id) DO NOTHING`, and only the row's creator sends the email. Delivery
+is at-least-once — a crash between sending and marking `SENT` resends — so a rare duplicate is
+possible, a lost notification is not. See §04.

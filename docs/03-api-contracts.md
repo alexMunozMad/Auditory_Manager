@@ -1,4 +1,4 @@
-# 03 · API contracts
+# 03 · API contracts · HTTP
 
 Two audiences, two contracts. The **client API** is what a paying client calls. The **internal API**
 is what operations calls. They are separate because they have different threat models and different
@@ -6,6 +6,22 @@ vocabularies, not because of URL cosmetics.
 
 Base: `/v1`. Version in the path — simplest to route, log and reproduce from a terminal. Header-based
 negotiation is more elegant and harder to debug, which is the wrong trade this early.
+
+The asynchronous side — the audit trail, the notification emails, client webhooks — is
+[`04 · Event contracts`](04-event-contracts.md).
+
+---
+
+## Endpoints at a glance
+
+| Method | Path | Audience | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/sites` | Client | Register a site, and its supplier if new |
+| `POST` | `/v1/audit-requests` | Client | Raise an audit request |
+| `GET` | `/v1/audit-requests/{id}` | Client | One request, projected across both tables |
+| `GET` | `/v1/audit-requests` | Client | The client's requests, cursor-paged |
+| `GET` | `/v1/audit-requests/{id}/report` | Client | Stream the report once accessible |
+| `POST` | `/internal/v1/audits/{id}/publication` | Internal | Attach the report, publish the audit |
 
 ---
 
@@ -34,7 +50,63 @@ nothing — confidentiality comes from never exposing an audit identifier, not f
 and it costs a mapping that support has to perform mentally every time it compares a client's screen
 with the database. One word per concept, everywhere.
 
-## 2 · `POST /v1/audit-requests`
+**The site catalogue is not confidential.** Any client can register and target any site (A10);
+`site` and `supplier` names are shared platform data. What stays private is every client's *request*
+and the audit behind it.
+
+---
+
+## 2 · `POST /v1/sites`
+
+Register a site so a request can target it. The frontend decides whether the supplier already
+exists; the endpoint takes it either way.
+
+```http
+POST /v1/sites
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "name": "Warehouse 7", "supplier": { "id": "018f3a2c-...-1000" } }
+```
+```json
+{ "name": "Warehouse 7", "supplier": { "name": "Acme Pharma SL" } }
+```
+
+**One endpoint, flexible supplier.** `supplier.id` uses an existing supplier. `supplier.name`
+resolves to an existing supplier of that name, or creates one. Both present → `id` wins. Neither →
+`422`.
+
+### `201 Created` / `200 OK`
+
+```json
+{
+  "id": "018f7a10-...-2af0",
+  "name": "Warehouse 7",
+  "supplier": { "id": "018f3a2c-...-1000", "name": "Acme Pharma SL" }
+}
+```
+
+`201` when the site is created, `200` when it already existed under this supplier — the call is
+idempotent on `(name, supplier)`.
+
+**Names are unique.** `supplier.name` is unique, so a second "Acme Pharma SL" is never created; the
+existing row is used. `site.name` is unique globally: a site belongs to exactly one supplier and is
+never re-parented.
+
+| Status | Type | When |
+|---|---|---|
+| `200` | — | Site already exists under this supplier |
+| `201` | — | Created |
+| `404` | `supplier-not-found` | `supplier.id` does not exist |
+| `409` | `site-name-taken` | A site with this name exists under a different supplier |
+| `422` | `validation-failed` | No supplier reference, or malformed body |
+
+*Assumption: a site name is a facility-unique identifier. If two suppliers can each hold a site of
+the same name, the uniqueness becomes `(supplier_id, name)` and this `409` goes away — see §02.*
+
+---
+
+## 3 · `POST /v1/audit-requests`
 
 Create a request. Assignment happens later (ADR 0001).
 
@@ -79,11 +151,16 @@ be interpreted.
 is what the subscription promises and what the problem statement talks about. The API projects back
 across the processing duration.
 
-**`expectedReportDate` is null until a slot exists.** Once assigned it holds
-`available_to_client_at` — the promise for *this* client, not the audit's publication date. It is
-set from the *projected* publication date at assignment and can move later once, if the audit slips
-in processing: it is reconciled to the actual date at publication (§02). `commitment.reportNoLaterThan`
-never moves — that is the contract; `expectedReportDate` is the current estimate.
+**`subscriptionLevel` is the frozen value.** The response echoes the level recorded on the request
+(A9), not the client's current level — they differ after an upgrade, and the request keeps the terms
+it was accepted under.
+
+**`expectedReportDate` is null until a slot exists.** Once assigned it holds `available_to_client_at`
+— the promise for *this* client, not the audit's publication date. It is set from the *projected*
+publication date at assignment and can move later once, if the audit slips in processing: it is
+reconciled to the actual date at publication (§02). `commitment.reportNoLaterThan` never moves —
+that is the contract; `expectedReportDate` is the current estimate, observable only by polling in
+this scope (A5).
 
 ### Idempotency
 
@@ -103,9 +180,12 @@ where that matters most, because the side effect is a booked auditor.
 | Status | Type | When |
 |---|---|---|
 | `400` | `validation-failed` | Malformed body, unknown field, missing key |
-| `403` | `site-not-accessible` | The site is not among the client's suppliers |
 | `404` | `site-not-found` | No such site |
 | `422` | `subscription-not-active` | `subscription_valid_until` has passed (A9) |
+
+**Any client can request any site (A10).** There is no `403 site-not-accessible`: audits are shared
+facts about sites, so scoping requests to a client's own suppliers would fight the sharing model. An
+unknown `siteId` is a plain `404`.
 
 **No status code means "no capacity".** A request that cannot be placed is still accepted and
 returns `201` with `PENDING` (A4). The maximum wait is a commitment, not a validity condition, and
@@ -118,7 +198,7 @@ two things support needs to tell apart.
 
 ---
 
-## 3 · `GET /v1/audit-requests/{id}`
+## 4 · `GET /v1/audit-requests/{id}`
 
 The projection across both tables. This endpoint is where the two-table split is paid for.
 
@@ -149,20 +229,18 @@ and neither can discover the other.
 is itself information.
 
 When the state is `UNSCHEDULABLE`, a `reason` field explains it. That is the only case where the
-client learns something went wrong, and it must not be silent.
-
-In this scope `reason` is always `deadline-passed-without-placement` — the single cause the model
-produces: `latest_audit_date` arrived with no free `(auditor, date)` pair left in the window. It is
-a constant emitted at serialization, not a stored column, for the same reason the discarded audit
-carries no reason column (§02 · one repeated value is not data). When a second cause appears it
-becomes a stored value.
+client learns something went wrong, and it must not be silent. In this scope `reason` is always
+`deadline-passed-without-placement` — the single cause the model produces: `latest_audit_date`
+arrived with no free `(auditor, date)` pair left in the window. It is a constant emitted at
+serialization, not a stored column, for the same reason the discarded audit carries no reason column
+(§02 · one repeated value is not data). When a second cause appears it becomes a stored value.
 
 ---
 
-## 4 · `GET /v1/audit-requests`
+## 5 · `GET /v1/audit-requests`
 
 ```http
-GET /v1/audit-requests?status=SCHEDULED&siteId=...&limit=20&cursor=<opaque>
+GET /v1/audit-requests?status=SCHEDULED&status=PENDING&siteId=...&limit=20&cursor=<opaque>
 ```
 
 ```json
@@ -172,20 +250,33 @@ GET /v1/audit-requests?status=SCHEDULED&siteId=...&limit=20&cursor=<opaque>
 }
 ```
 
+| Parameter | Contract |
+|---|---|
+| `status` | Optional. Repeatable — multiple values are OR'd. Only the five request states are accepted. |
+| `siteId` | Optional. Exact match. |
+| `limit` | Optional. Default 20, maximum 100. |
+| `cursor` | Optional. Opaque. An invalid or expired cursor is `400` · `invalid-cursor`, never a silent reset. |
+
+**Fixed sort: `requested_at DESC, id DESC`.** Not client-selectable. It matches index 6 exactly and
+is what the cursor encodes.
+
 **Cursor, not offset.** New requests arrive at the head of the list, so an offset shifts underneath
-a client paging through it and rows get skipped or repeated. The cursor encodes
-`(requested_at, id)` and matches index 6 exactly.
+a client paging through it and rows get skipped or repeated. The cursor encodes `(requested_at, id)`.
 
 ---
 
-## 5 · `GET /v1/audit-requests/{id}/report`
+## 6 · `GET /v1/audit-requests/{id}/report`
 
-`302` to a short-lived signed URL, or `200` with the document.
+**`200` with the document, streamed.** The endpoint reads `audit.report_uri` — the internal storage
+pointer (`s3://…`) — and streams the bytes back under the caller's own authorisation, checked on
+every request. No redirect, no signed URL: nothing addressable leaves the auth perimeter, which is
+the right default for a regulated report. Cost accepted: the application proxies the bytes, which is
+nothing for a PDF at this volume.
 
 | Status | When |
 |---|---|
-| `302` / `200` | The request is `FULFILLED` |
-| `409` · `report-not-yet-available` | Scheduled, but `available_to_client_at` has not arrived |
+| `200` | The request is `FULFILLED` |
+| `409` · `report-not-yet-available` | Attached, but not `FULFILLED`: the access date has not arrived, **or** the audit has not published |
 | `404` | Any other state, or another client's request |
 
 **`409` is the interesting one.** The report may physically exist — published for another client
@@ -194,9 +285,11 @@ because "not found" would be a lie the client could later disprove.
 
 ---
 
-## 6 · Internal API
+## 7 · Internal API
 
-Not reachable by clients. Separate credentials.
+Not reachable by clients. **Network-isolated** — not internet-facing — and called with a service
+credential: mutual TLS, or the OAuth client-credentials grant. Not the focus of the exercise; stated
+so the boundary is explicit rather than assumed.
 
 ### `POST /internal/v1/audits/{id}/publication`
 
@@ -204,17 +297,24 @@ Not reachable by clients. Separate credentials.
 { "reportUri": "s3://reports/018f7c3d-...-1a44.pdf" }
 ```
 
-Moves the audit to `PUBLISHED`, sets `published_at` and `valid_until`, and emits `AuditPublished`,
-which fulfils every attached request whose access date has already passed.
+Moves the audit to `PUBLISHED`, sets `published_at` and `valid_until`, emits `AuditPublished`, and
+reconciles `available_to_client_at` on every attached request against the actual publication date
+(§02), fulfilling those already due.
 
-| Status | When |
-|---|---|
-| `200` | Published |
-| `409` · `audit-not-in-progress` | Wrong state |
-| `422` | Missing or malformed `reportUri` |
+| Status | Type | When |
+|---|---|---|
+| `200` | — | Published — or re-called with the same `reportUri` on an already-published audit |
+| `409` | `audit-already-published` | Re-called with a different `reportUri` |
+| `409` | `audit-not-in-progress` | The audit is `SCHEDULED` or `DISCARDED` |
+| `422` | `validation-failed` | Missing or malformed `reportUri` |
 
-Publication is an endpoint because it carries data from outside the system — the report itself.
-**`SCHEDULED → IN_PROGRESS` is not an endpoint**, because nothing arrives with it: the audit date
+**Idempotent on retry.** The caller is an external system uploading a file; a network timeout after
+the server has committed must be safe to retry. The audit's state is the dedup key — already
+`PUBLISHED` with the same `reportUri` replays `200` and emits nothing; a different `reportUri` is a
+conflict. No `Idempotency-Key` header is needed.
+
+**Publication is an endpoint because it carries data from outside the system** — the report itself.
+`SCHEDULED → IN_PROGRESS` is *not* an endpoint, because nothing arrives with it: the audit date
 passes and the daily sweep advances the state. Only transitions that need input from outside get a
 verb.
 
@@ -228,7 +328,7 @@ reaches them is an operations script, not this contract (§02).
 
 ---
 
-## 7 · Errors
+## 8 · Errors
 
 RFC 9457 `application/problem+json` throughout:
 
@@ -247,11 +347,15 @@ A stable `type` URI is what clients branch on. Reason phrases and `detail` text 
 
 ---
 
-## 8 · How the client learns that something changed
+## 9 · How the client learns that something changed
 
-Polling `GET /v1/audit-requests/{id}` in this scope. Assignment typically completes in seconds, and
-publication is weeks away, so a client polls twice: once shortly after creating the request, and
-once around the committed date.
+**Polling** `GET /v1/audit-requests/{id}` is the synchronous answer. Assignment typically completes
+in seconds and publication is weeks away, so a client polls twice: once shortly after creating the
+request, once around the committed date.
 
-Webhooks are the obvious evolution and are already paid for: the events exist in the outbox (A8), so
-delivering them outward is a consumer, not a new mechanism.
+**Notifications.** In parallel, the notification component emails the client on three events —
+request received, audit assigned, report ready — consumed from the outbox. That path, its payloads
+and its concurrency control are [`04 · Event contracts`](04-event-contracts.md).
+
+**Webhooks** are the obvious evolution and are already paid for: the events exist in the outbox
+(A8), so delivering them outward is a consumer, not a new mechanism.

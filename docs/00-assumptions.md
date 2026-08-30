@@ -420,3 +420,35 @@ makes both harmless.
 **Consequence for reuse (A7).** A client who upgrades gains access to more of the existing audit
 inventory — but only for requests made from that point on. Audits already attached to their earlier
 requests keep the terms under which those requests were accepted.
+
+---
+
+## A10 · The site catalogue is written here, and any client can request any site
+
+**Decision.** `supplier` and `site` are inserted through this system (`POST /v1/sites`), not
+maintained entirely elsewhere. `client` and `auditor` stay read-only. A client may request an audit
+of any site in the catalogue — there is no "your own suppliers only" restriction.
+
+**Why the catalogue moved in.** The frontend registers a supplier and its site at the point of
+raising the first request; splitting that across a second system for an MVP is friction with no
+payoff. Writes are insert-only. Names are unique — `supplier` by name, `site` by name as a facility
+identifier — so the endpoint resolves an existing supplier instead of duplicating it, and refuses to
+re-parent a site to a different supplier.
+
+```
+POST /v1/sites  { name, supplier: { id } }        -- existing supplier
+POST /v1/sites  { name, supplier: { name } }      -- resolve-or-create supplier, then create site
+```
+
+**Why requests are not scoped to the client's suppliers.** Audits are shared facts about sites (A7);
+two clients using the same supplier already share its audits. The "own suppliers" filter was UX, not
+a security boundary, and enforcing it as one would contradict the sharing model. If the business
+wants it back, it is a filter over the catalogue, not a change to the schema.
+
+**Consequence.** `POST /v1/audit-requests` drops `403 site-not-accessible`; an unknown site is just
+`404`. Confidentiality still holds where it matters: no client sees another's requests, its
+co-requesters, or any audit identifier (A7, §03).
+
+**Cost accepted.** Two clients racing to register the same new supplier: the `UNIQUE (name)` makes
+one win and the other's insert resolve to the winner's row. A site name genuinely shared by two
+suppliers would need the composite key instead — recorded in §02, not built.

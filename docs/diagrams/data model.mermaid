@@ -1,19 +1,22 @@
 erDiagram
-    %% Written by this system:  audit_request, audit, outbox_event
-    %% Read-only here (maintained elsewhere):  supplier, site, client, auditor
+    %% Scheduling domain writes:  audit_request, audit, outbox_event
+    %% Catalogue, insert-only here (A10):  supplier, site
+    %% Read-only here (maintained elsewhere):  client, auditor
+    %% Notification component (separate concern, §04):  notification_dispatch
 
     supplier {
         uuid id PK
-        text name
+        text name "unique"
     }
     site {
         uuid id PK
         uuid supplier_id FK
-        text name
+        text name "unique; one supplier, never re-parented"
     }
     client {
         uuid id PK
         text name
+        text contact_email
         text subscription_level_code "ESSENTIALS|ADVANCED|PREMIUM"
         date subscription_valid_until
     }
@@ -60,6 +63,14 @@ erDiagram
         jsonb payload
         timestamptz occurred_at
         timestamptz published_at "null until relayed"
+    }
+    notification_dispatch {
+        uuid event_id PK "= outbox_event.id, no FK"
+        text channel "email"
+        text recipient
+        text status "CLAIMED|SENT|FAILED"
+        timestamptz created_at
+        timestamptz sent_at
     }
 
     supplier ||--o{ site          : "owns"

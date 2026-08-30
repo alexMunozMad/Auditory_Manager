@@ -32,23 +32,27 @@ Two distinctions carry most of the design:
 
 ## 2 · Entities
 
-**This system writes two tables and reads the rest.**
+**This system writes `AuditRequest` and `Audit`, appends to the `Supplier`/`Site` catalogue, and
+reads the rest.**
 
 | Written here | Owns | References by id |
 |---|---|---|
 | `AuditRequest` | its delivery window, its frozen subscription level, its status | `client_id`, `site_id`, `audit_id` |
 | `Audit` | its date, its durations, `valid_until`, its report, its status | `site_id`, `auditor_id` |
 
+| Catalogue · insert-only here (A10) | Holds |
+|---|---|
+| `Supplier` | identity, name (unique) |
+| `Site` | identity, name (unique), `supplier_id` — set once, never re-parented |
+
 | Read here | Holds |
 |---|---|
-| `Client` | `subscription_level_code`, `subscription_valid_until` |
+| `Client` | `contact_email`, `subscription_level_code`, `subscription_valid_until` |
 | `Auditor` | identity, active flag |
-| `Site` | identity, `supplier_id` |
-| `Supplier` | identity, name |
 
-The four read-only tables are ordinary classes with objects; they simply have no state machine, no
-invariants to protect in this scope, and no endpoints that modify them. Who maintains them is
-outside the exercise.
+`Client` and `Auditor` are ordinary classes with objects: no state machine, no invariants to protect
+in this scope, no endpoints that modify them. `Supplier` and `Site` are written only through one
+endpoint (`POST /v1/sites`) and only ever inserted — a catalogue, not an aggregate with behaviour.
 
 What an entity owns defines **what gets loaded and saved together**. Anything outside that boundary
 is reached by query, using an id.
