@@ -114,6 +114,7 @@ rows contain, and by the time it finds out, another transaction may have changed
 | Rule | Object |
 |---|---|
 | The delivery window is derived once from the frozen level and never recomputed | `AuditRequest` |
+| `earliest_audit_date = max(requested_at + min_window − processing_duration, tomorrow)` | `AuditRequest` |
 | `latest_audit_date = requested_at + max_wait − processing_duration` | `AuditRequest` |
 | A request only attaches to an audit satisfying both reuse conditions (A7) | `AuditRequest` |
 | `published_at = audit_date + processing_duration_days` | `Audit` |
@@ -154,6 +155,13 @@ DeliveryWindow      earliestAuditDate, latestAuditDate
 It carries the whole of A1. The translation from "report no earlier than four weeks" into an
 interval of admissible audit dates happens once, in one place, and everything else only asks whether
 a date falls inside it. If that rule is ever wrong, there is exactly one place to fix.
+
+**The floor at tomorrow lives here too.** `requested_at + min_window − processing_duration` is a
+date in the past for Premium (`min_window` 0, `processing` 7), so `DeliveryWindow` clamps
+`earliestAuditDate` to tomorrow: no audit is ever scheduled for today or earlier. This is the rule
+§6 leans on when it says a slot freed for today finds no candidate. The database mirrors only the
+cheap half of it — `earliest_audit_date > (requested_at AT TIME ZONE 'UTC')::date` (§02) — as a
+guard against the clamp being skipped.
 
 Everything else is a single line of arithmetic on `Audit` and does not need a type of its own.
 **`valid_until` is a plain date, not a range.** A range type earned its place only while it fed a

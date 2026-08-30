@@ -71,7 +71,9 @@ CREATE TABLE audit (
     CONSTRAINT audit_validity_after_publication
         CHECK (valid_until IS NULL OR valid_until > published_at),
     CONSTRAINT audit_published_has_date
-        CHECK (status <> 'PUBLISHED' OR published_at IS NOT NULL)
+        CHECK (status <> 'PUBLISHED' OR published_at IS NOT NULL),
+    CONSTRAINT audit_published_has_report
+        CHECK (status <> 'PUBLISHED' OR report_uri IS NOT NULL)
 );
 ```
 
@@ -88,6 +90,19 @@ index would not catch the conflict. The type is doing part of the enforcement.
 is where the calendar-year arithmetic and the leap-day rule already live (A7). A generated column
 would put the same rule in a second place.
 
+**`valid_until` is not tied to `published_at` by a `CHECK`.** `audit_validity_paired` and
+`audit_validity_after_publication` keep the two columns paired and ordered, but the exact rule —
+twelve calendar months, with 29/02 mapping to 28/02 (A7) — lives only in the domain object.
+Encoding it as a `CHECK` would duplicate the calendar-year arithmetic; a loose bounds check
+(`between published_at + 360d and + 370d`) would introduce an arbitrary number to defend. This is
+the same call made when the range-exclusion constraint was dropped: **the arithmetic is a test's
+job, not a constraint's.** Written here so it reads as a decision, not an omission.
+
+**A `PUBLISHED` audit must carry a report.** `audit_published_has_report` mirrors
+`audit_published_has_date`: the row that represents a published audit is inconsistent without the
+document reference it exists to hold. `DISCARDED` is only reachable from `SCHEDULED` (§01), so no
+non-published state ever has a `report_uri` to check against.
+
 ---
 
 ## 3 · `audit_request`
@@ -100,7 +115,9 @@ CREATE TABLE audit_request (
     audit_id                 uuid        REFERENCES audit(id)           ON DELETE RESTRICT,
 
     requested_at             timestamptz NOT NULL,
-    subscription_level_code  text        NOT NULL,
+    subscription_level_code  text        NOT NULL,  -- frozen copy: the level in force when the
+                                                   -- request was accepted (A6, A9). Never
+                                                   -- re-derived from client.subscription_level_code.
     earliest_audit_date      date        NOT NULL,
     latest_audit_date        date        NOT NULL,
     available_to_client_at   date,
@@ -116,6 +133,8 @@ CREATE TABLE audit_request (
         CHECK (status IN ('PENDING', 'SCHEDULED', 'FULFILLED', 'UNSCHEDULABLE', 'CANCELLED')),
     CONSTRAINT request_window_ordered
         CHECK (earliest_audit_date <= latest_audit_date),
+    CONSTRAINT request_window_starts_in_future
+        CHECK (earliest_audit_date > (requested_at AT TIME ZONE 'UTC')::date),
     CONSTRAINT request_attached_has_audit
         CHECK (status NOT IN ('SCHEDULED', 'FULFILLED') OR audit_id IS NOT NULL),
     CONSTRAINT request_cancelled_has_reason
@@ -128,17 +147,46 @@ CREATE TABLE audit_request (
 never recomputed (A6, A9). They are the contractual commitment; everything else about the request is
 derived from them.
 
+**`request_window_starts_in_future` is a sanity guard, not the window rule.** The window itself is
+resolved in the domain object (§01):
+
+```
+earliest_audit_date = max(requested_at + min_window − processing_duration, tomorrow)
+latest_audit_date   = requested_at + max_wait − processing_duration
+```
+
+The `CHECK` only asserts the cheap invariant that the earliest admissible date is after the day the
+request arrived. It catches a broken floor — Premium's raw `requested_at + 0 − 7` is a week in the
+past before the `max(…, tomorrow)` clamp is applied — without re-encoding the arithmetic. The
+`AT TIME ZONE 'UTC'` pins the cast to a fixed zone so it does not drift with the session's `TimeZone`
+setting; a one-day fuzz at the boundary is irrelevant to a guard whose job is to catch a
+week-in-the-past.
+
+**`latest_audit_date` is frozen with the default `processing_duration_days` (7).** In this scope the
+duration never varies from the default, so this request-time arithmetic and the audit-time
+`published_at = audit_date + processing_duration_days` agree. If the duration becomes genuinely
+variable per audit, `latest_audit_date` must be recomputed against the audit's actual value — or the
+placement and reuse checks must read it from the audit rather than assume the default. Identified,
+not built (A1).
+
 **`requested_at` is `timestamptz`, the window columns are `date`.** The instant of acceptance is a
 point in time; the scheduling window is a set of calendar days. Different questions, different types.
 
 **Cancelling requires a reason.** In a regulated domain, knowing that something was withdrawn
 without knowing why is half an answer. The constraint makes it impossible to record half.
 
+No client-facing endpoint reaches `CANCELLED` (§03) — cancellation, and audit discard, are modelled
+and reachable only through an operations path. That is exactly why the invariant belongs in the
+database: the one writer that *does* reach these states is a hand-run script or console, one
+forgotten `SET cancellation_reason` away from a half-recorded withdrawal. The state machine is
+complete; the HTTP surface is a deliberate subset, not the edge of the model.
+
 **`available_to_client_at` is stored although it is derivable.** It could be computed as
 `max(audit.published_at, requested_at + min_window)` at query time. It is stored because it is the
 key of the fulfilment sweep — `WHERE status = 'SCHEDULED' AND available_to_client_at <= CURRENT_DATE`
-is an indexed scan, whereas the computed form is a `GREATEST` over a join that no index serves. It
-also records **the promise that was made**, rather than a promise recalculated afterwards.
+is an indexed scan against index 8, whereas the computed form is a `GREATEST` over a join that no
+index serves. It also records **the promise that was made**, rather than a promise recalculated
+afterwards.
 
 ---
 
@@ -214,11 +262,17 @@ A constraint that protects nothing is a constraint to explain later.
 | 5 | `(audit_id) WHERE status = 'SCHEDULED'` | Fan-out on `AuditPublished`; counting remaining requests when one is cancelled. |
 | 6 | `(client_id, requested_at DESC)` | `GET /audit-requests` for a client. |
 | 7 | `(occurred_at) WHERE published_at IS NULL` | The relay's poll for unpublished events. |
+| 8 | `(available_to_client_at) WHERE status = 'SCHEDULED'` | The daily fulfilment sweep: scheduled requests whose access date has arrived. |
 
-**Five of seven are partial.** Each excludes rows that the query never looks at — resolved requests,
+**Six of eight are partial.** Each excludes rows that the query never looks at — resolved requests,
 cancelled audits, already-published events — so the indexes stay small no matter how large the
 tables grow. Index 7 is the clearest case: with a relay that keeps up, it holds a handful of rows
 however many millions the table accumulates.
+
+**Index 8 is the fulfilment sweep's key.** Index 5 is `(audit_id) WHERE status = 'SCHEDULED'` — it
+serves the fan-out on `AuditPublished` (given an audit, its attached requests) and cannot serve the
+sweep, which scans every scheduled request by date. Different leading column, separate index. It is
+partial and tiny: only requests already attached and waiting for their own access date to arrive.
 
 ### The one query no index serves well
 
@@ -241,6 +295,18 @@ introduces a type and an index method to optimise a scan over a small set.
 
 **No physical deletion.** Every foreign key is `ON DELETE RESTRICT`. A `CASCADE` anywhere would
 contradict the traceability policy (A8).
+
+**No optimistic-locking column.** There is no `version` on `audit` or `audit_request`. Every row is
+written by a single writer by construction: the assignment worker owns each `audit_request`
+transition out of `PENDING` and the whole `audit` lifecycle, and the publication endpoint touches
+only `IN_PROGRESS` audits the worker has already let go of (transitions start from named states,
+never a wildcard — §01, §03). Two transactions never race to write the same row. Where concurrency
+is real — two requests competing for a slot, or a future second worker — the arbiter is a unique
+index, not a version check. Full rationale: [ADR 0003](adr/0003-no-optimistic-concurrency-control.md).
+
+**Cost accepted.** If assignment is ever parallelised per site, row-level races on `audit` become
+possible and a `version` column or `SELECT … FOR UPDATE` has to be added. The partial index
+`audit_one_in_flight_per_site` still prevents concurrent in-flight audits until then.
 
 **UUIDv7 identifiers**, time-ordered, so inserts land at the end of the B-tree instead of scattering
 and splitting pages. Cost accepted: the identifier leaks its creation instant, which is acceptable

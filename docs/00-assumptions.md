@@ -34,6 +34,16 @@ published_at = audit_date + processing_duration_days
  month = 30 days
 ```
 
+**The lower bound is floored at tomorrow.** For Premium the raw expression `requested_at + 0 − 7` is
+a week in the past, so the resolved column is
+
+```
+earliest_audit_date = max(requested_at + min_window − processing_duration, tomorrow)
+```
+
+No audit is scheduled for today or earlier. `DeliveryWindow` (§01) owns the clamp; the database
+carries only a cheap guard, `earliest_audit_date > (requested_at AT TIME ZONE 'UTC')::date` (§02).
+
 The assignment algorithm reduces to: **find the earliest free date inside the interval, held by the
 least loaded eligible auditor.**
 
@@ -59,6 +69,14 @@ audit starting on D with duration 3 occupies D, D+1 and D+2, and a second row st
 *not* violate uniqueness on the start date while genuinely overlapping. Uniqueness on a single date
 stops being sufficient, and the selection logic changes from "is this date free" to "is this range
 free". Nothing else in the design moves.
+
+**If `processing_duration_days` becomes variable**, the request-time window arithmetic and the
+audit-time publication arithmetic stop agreeing. `latest_audit_date` is frozen at acceptance with
+the default (7); `published_at = audit_date + processing_duration_days` uses the audit's own value.
+While the two are equal — as they are in this scope — an audit placed on `latest_audit_date`
+publishes exactly on the contractual ceiling. If they diverge, `latest_audit_date` has to be
+recomputed against the audit's actual value, or the placement and reuse checks must read it from the
+audit. Identified, not built.
 
 ---
 
