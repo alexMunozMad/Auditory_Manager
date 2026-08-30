@@ -1,7 +1,6 @@
 erDiagram
-    classDef written  fill:#fff6b6,stroke:#af7e02
-    classDef readonly fill:#e7e7e7,stroke:#595959
-    classDef trace    fill:#c6dcff,stroke:#305bab
+    %% Written by this system:  audit_request, audit, outbox_event
+    %% Read-only here (maintained elsewhere):  supplier, site, client, auditor
 
     supplier {
         uuid id PK
@@ -69,11 +68,3 @@ erDiagram
     client   ||--o{ audit_request : "raises"
     auditor  ||--o{ audit         : "performs"
     audit    |o--o{ audit_request : "fulfils"
-
-    class audit_request written
-    class audit written
-    class supplier readonly
-    class site readonly
-    class client readonly
-    class auditor readonly
-    class outbox_event trace
