@@ -1,70 +1,79 @@
-classDiagram
+erDiagram
+    classDef written  fill:#fff6b6,stroke:#af7e02
+    classDef readonly fill:#e7e7e7,stroke:#595959
+    classDef trace    fill:#c6dcff,stroke:#305bab
 
-    class supplier {
-        +uuid id PK
-        +text name
+    supplier {
+        uuid id PK
+        text name
+    }
+    site {
+        uuid id PK
+        uuid supplier_id FK
+        text name
+    }
+    client {
+        uuid id PK
+        text name
+        text subscription_level_code "ESSENTIALS|ADVANCED|PREMIUM"
+        date subscription_valid_until
+    }
+    auditor {
+        uuid id PK
+        text name
+        boolean active
+    }
+    audit_request {
+        uuid id PK
+        uuid client_id FK
+        uuid site_id FK
+        uuid audit_id FK "null while PENDING"
+        timestamptz requested_at
+        text subscription_level_code "frozen (A6, A9)"
+        date earliest_audit_date "frozen"
+        date latest_audit_date "frozen deadline"
+        date available_to_client_at "null until attached; reconciled at publication"
+        text status "PENDING|SCHEDULED|FULFILLED|UNSCHEDULABLE|CANCELLED"
+        text cancellation_reason "null unless CANCELLED"
+        text idempotency_key
+        timestamptz created_at
+        timestamptz updated_at "trigger-maintained"
+    }
+    audit {
+        uuid id PK
+        uuid site_id FK
+        uuid auditor_id FK
+        date audit_date "UNIQUE with auditor_id"
+        int audit_duration_days "default 1"
+        int processing_duration_days "default 7"
+        date published_at "null until published"
+        date valid_until "published_at + 1 year"
+        text report_uri "null until published"
+        text status "SCHEDULED|IN_PROGRESS|PUBLISHED|DISCARDED"
+        timestamptz created_at
+        timestamptz updated_at "trigger-maintained"
+    }
+    outbox_event {
+        uuid id PK
+        text aggregate_type
+        uuid aggregate_id "no FK by design (A8)"
+        text event_type
+        jsonb payload
+        timestamptz occurred_at
+        timestamptz published_at "null until relayed"
     }
 
-    class site {
-        +uuid id PK
-        +uuid supplier_id FK
-        +text name
-    }
+    supplier ||--o{ site          : "owns"
+    site     ||--o{ audit_request : "targeted by"
+    site     ||--o{ audit         : "audited by"
+    client   ||--o{ audit_request : "raises"
+    auditor  ||--o{ audit         : "performs"
+    audit    |o--o{ audit_request : "fulfils"
 
-    class client {
-        +uuid id PK
-        +text name
-        +text subscription_level_code
-        +date subscription_valid_until
-    }
-
-    class auditor {
-        +uuid id PK
-        +text name
-        +boolean active
-    }
-
-    class audit_request {
-        +uuid id PK
-        +uuid client_id FK
-        +uuid site_id FK
-        +uuid audit_id FK
-        +timestamptz requested_at
-        +text subscription_level_code
-        +date earliest_audit_date
-        +date latest_audit_date
-        +date available_to_client_at
-        +text status
-        +text cancellation_reason
-        +text idempotency_key
-    }
-
-    class audit {
-        +uuid id PK
-        +uuid site_id FK
-        +uuid auditor_id FK
-        +date audit_date
-        +int audit_duration_days
-        +int processing_duration_days
-        +date published_at
-        +date valid_until
-        +text report_uri
-        +text status
-    }
-
-    class outbox_event {
-        +uuid id PK
-        +text aggregate_type
-        +uuid aggregate_id
-        +text event_type
-        +jsonb payload
-        +timestamptz occurred_at
-        +timestamptz published_at
-    }
-
-    supplier "1" -- "*" site : owns
-    site "1" -- "*" audit_request : targeted_by
-    site "1" -- "*" audit : audited_by
-    client "1" -- "*" audit_request : raises
-    auditor "1" -- "*" audit : performs
-    audit "0..1" -- "*" audit_request : fulfils_N_clients
+    class audit_request written
+    class audit written
+    class supplier readonly
+    class site readonly
+    class client readonly
+    class auditor readonly
+    class outbox_event trace

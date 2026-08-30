@@ -183,10 +183,31 @@ complete; the HTTP surface is a deliberate subset, not the edge of the model.
 
 **`available_to_client_at` is stored although it is derivable.** It could be computed as
 `max(audit.published_at, requested_at + min_window)` at query time. It is stored because it is the
-key of the fulfilment sweep — `WHERE status = 'SCHEDULED' AND available_to_client_at <= CURRENT_DATE`
-is an indexed scan against index 8, whereas the computed form is a `GREATEST` over a join that no
-index serves. It also records **the promise that was made**, rather than a promise recalculated
-afterwards.
+key of the fulfilment sweep:
+
+```sql
+SELECT ar.id
+  FROM audit_request ar
+  JOIN audit a ON a.id = ar.audit_id
+ WHERE ar.status = 'SCHEDULED'
+   AND ar.available_to_client_at <= CURRENT_DATE
+   AND a.status = 'PUBLISHED';
+```
+
+Index 8 narrows `audit_request` to the candidate set; the join to `audit` is by primary key. The
+computed form would be a `GREATEST` over a join that no index serves.
+
+**`a.status = 'PUBLISHED'` is not optional.** `available_to_client_at` is set at attach from the
+*projected* publication date, so if the audit slips and stays `IN_PROGRESS`, that date can pass
+while no report exists. The sweep must not fulfil a request whose audit has not published — the rule
+is `fulfilled ⟺ audit PUBLISHED ∧ today ≥ available_to_client_at` (§01).
+
+**`available_to_client_at` is reconciled once, at publication.** The value written at attach is a
+projection. When `AuditPublished` fires, the handler recomputes it as
+`max(actual published_at, requested_at + min_window)` for each attached request, then fulfils those
+already due. It is corrected once, when reality lands — not recalculated on every read. The frozen
+contractual ceiling (`latest_audit_date`, and the `reportNoLaterThan` the client was told) does not
+move; only the estimate does.
 
 ---
 
@@ -257,7 +278,7 @@ A constraint that protects nothing is a constraint to explain later.
 |---|---|---|
 | 1 | `UNIQUE (auditor_id, audit_date)` | Constraint. Also answers "is this auditor free on this date". |
 | 2 | `UNIQUE (site_id) WHERE status IN ('SCHEDULED','IN_PROGRESS')` | Constraint. Also answers "does this site have an audit in flight". |
-| 3 | `(site_id, valid_until) WHERE status <> 'DISCARDED'` | Reuse check: the most recent audit for a site and whether it is still valid. |
+| 3 | `(site_id, valid_until) WHERE status = 'PUBLISHED'` | Reuse check, published branch: the current valid audit for a site. Also the floor at the previous audit's expiry (A7). |
 | 4 | `(latest_audit_date) WHERE status = 'PENDING'` | The worker's claim query, ordered by deadline. |
 | 5 | `(audit_id) WHERE status = 'SCHEDULED'` | Fan-out on `AuditPublished`; counting remaining requests when one is cancelled. |
 | 6 | `(client_id, requested_at DESC)` | `GET /audit-requests` for a client. |
@@ -273,6 +294,17 @@ however many millions the table accumulates.
 serves the fan-out on `AuditPublished` (given an audit, its attached requests) and cannot serve the
 sweep, which scans every scheduled request by date. Different leading column, separate index. It is
 partial and tiny: only requests already attached and waiting for their own access date to arrive.
+The sweep still joins `audit` to require `PUBLISHED` (§3); index 8 narrows the set, the join is
+by PK.
+
+**The reuse check (A7) is two reads, not one.** An in-flight audit — `SCHEDULED` or `IN_PROGRESS` —
+is also a reuse candidate, but its `valid_until` is `NULL` until publication (`audit_validity_paired`),
+so index 3 cannot answer for it. It does not have to. Index 2 is a partial *unique* index, so the
+site has **at most one** in-flight audit, and index 2 returns it directly; its validity is projected
+in code (`audit_date + processing_duration_days + 1 year`). Index 3 returns the current published
+audit with its real `valid_until`. The code checks each against the two A7 conditions. Index 2 earns
+a second use and the apparent gap closes — which is why index 3's predicate is `status = 'PUBLISHED'`,
+not `status <> 'DISCARDED'`: the non-published rows it used to hold were `NULL` entries nobody reads.
 
 ### The one query no index serves well
 
@@ -319,6 +351,24 @@ states table adds a join and lets someone insert a value the code does not know 
 A Postgres `ENUM` type is avoided too: adding a value is a migration with awkward transactional
 behaviour and values cannot be removed, whereas changing a `CHECK` is an ordinary migration. The set
 of states is expected to grow — `DISCARDED` on the audit already arrived late.
+
+**`updated_at` is maintained by a trigger, not by the application.** Both written tables carry a
+`BEFORE UPDATE` trigger calling one shared function:
+
+```sql
+CREATE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN NEW.updated_at := now(); RETURN NEW; END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER audit_set_updated_at         BEFORE UPDATE ON audit
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER audit_request_set_updated_at BEFORE UPDATE ON audit_request
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+```
+
+An `@UpdateTimestamp` on the ORM entity would leave the column stale whenever the operations path
+writes a row by hand — the same path that reaches `CANCELLED` and `DISCARDED`. The trigger keeps the
+column honest whatever the writer, for the same reason the invariants sit in the database.
 
 **Auditor workload is computed, never stored.** No counter column on `auditor`.
 

@@ -80,7 +80,10 @@ is what the subscription promises and what the problem statement talks about. Th
 across the processing duration.
 
 **`expectedReportDate` is null until a slot exists.** Once assigned it holds
-`available_to_client_at` — the promise for *this* client, not the audit's publication date.
+`available_to_client_at` — the promise for *this* client, not the audit's publication date. It is
+set from the *projected* publication date at assignment and can move later once, if the audit slips
+in processing: it is reconciled to the actual date at publication (§02). `commitment.reportNoLaterThan`
+never moves — that is the contract; `expectedReportDate` is the current estimate.
 
 ### Idempotency
 
