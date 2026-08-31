@@ -1,42 +1,7 @@
-# System context
+# System context · legend
 
-A one-glance view of how the pieces fit. Nodes are names only; the function of each element and
-what each edge carries are in the legend below, so the picture stays readable.
-
-```mermaid
-flowchart LR
-    CL["Client apps"]
-    OPS["Operations"]
-    A0["Auth0"]
-    EXT["Auditor-management context"]
-
-    subgraph APP["Audit scheduling application"]
-        API["HTTP API"]
-        WK["Assignment worker"]
-        RLY["Outbox relay"]
-        NM["Notification consumer"]
-    end
-
-    PG[("PostgreSQL")]
-    BRK{{"Message broker"}}
-    TRAIL["Audit-trail service"]
-    MAIL["Email provider"]
-
-    CL -->|HTTPS + JWT| API
-    OPS -->|HTTPS + JWT| API
-    API -.->|validate JWT| A0
-    API --> PG
-    WK --> PG
-    RLY -->|poll| PG
-    NM -->|dedup| PG
-    RLY -->|publish| BRK
-    BRK -->|every event| TRAIL
-    BRK -->|request events| NM
-    NM -->|send| MAIL
-    EXT -->|capacity events| BRK
-    BRK -->|capacity events| WK
-    PG -.->|LISTEN / NOTIFY| WK
-```
+The nodes in [`context.mermaid`](context.mermaid) are names only. Here is what each one does and
+what each edge carries — a reference for the defence, kept out of the picture so it stays readable.
 
 ## What each element does
 

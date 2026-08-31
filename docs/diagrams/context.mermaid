@@ -1,0 +1,32 @@
+flowchart LR
+    CL["Client apps"]
+    OPS["Operations"]
+    A0["Auth0"]
+    EXT["Auditor-management context"]
+
+    subgraph APP["Audit scheduling application"]
+        API["HTTP API"]
+        WK["Assignment worker"]
+        RLY["Outbox relay"]
+        NM["Notification consumer"]
+    end
+
+    PG[("PostgreSQL")]
+    BRK{{"Message broker"}}
+    TRAIL["Audit-trail service"]
+    MAIL["Email provider"]
+
+    CL -->|HTTPS + JWT| API
+    OPS -->|HTTPS + JWT| API
+    API -.->|validate JWT| A0
+    API --> PG
+    WK --> PG
+    RLY -->|poll| PG
+    NM -->|dedup| PG
+    RLY -->|publish| BRK
+    BRK -->|every event| TRAIL
+    BRK -->|request events| NM
+    NM -->|send| MAIL
+    EXT -->|capacity events| BRK
+    BRK -->|capacity events| WK
+    PG -.->|LISTEN / NOTIFY| WK
