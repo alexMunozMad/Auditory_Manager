@@ -209,6 +209,10 @@ A safety net never observed catching anything has not been shown to work. Testco
 in-memory database: the design delegates two guarantees to the engine — partial unique indexes under
 concurrency and `SKIP LOCKED` — and an in-memory store reproduces neither (testing strategy · `06`).
 
+The race and its resolution are drawn in
+[`diagrams/assignment-concurrency.mermaid`](diagrams/assignment-concurrency.mermaid); the worker's
+decision tree in [`diagrams/worker-decision.mermaid`](diagrams/worker-decision.mermaid).
+
 ---
 
 ## 10 · One-paragraph version

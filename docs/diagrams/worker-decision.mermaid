@@ -1,0 +1,16 @@
+flowchart TD
+    S(["PENDING request claimed<br/>FOR UPDATE SKIP LOCKED"]) --> R{"Reusable audit for the site?<br/>two reads: in-flight + published"}
+    R -->|"yes - meets ceiling and access date (A7)"| ATT["Attach: set audit_id and<br/>available_to_client_at"]
+    R -->|no| SLOT{"Free date in the window for a<br/>least-loaded eligible auditor?"}
+    SLOT -->|yes| NEW["INSERT audit<br/>floored at previous valid_until + 1 day"]
+    NEW --> U{"UNIQUE auditor_id + audit_date"}
+    U -->|ok| ATT
+    U -->|"violation 23505"| NEXT["next candidate"]
+    NEXT --> SLOT
+    SLOT -->|no| D{"latest_audit_date passed?"}
+    D -->|no| PEND["stays PENDING<br/>awaits a capacity event"]
+    D -->|yes| UNS["UNSCHEDULABLE<br/>emit AuditRequestUnschedulable"]
+    ATT --> SCHED["audit_request to SCHEDULED<br/>emit AuditRequestScheduled"]
+    SCHED --> E([done])
+    PEND --> E
+    UNS --> E
