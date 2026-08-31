@@ -210,9 +210,9 @@ A safety net never observed catching anything has not been shown to work. Testco
 in-memory database: the design delegates two guarantees to the engine — partial unique indexes under
 concurrency and `SKIP LOCKED` — and an in-memory store reproduces neither (testing strategy · `06`).
 
-The collision itself — two workers, the constraint, what the loser does — is drawn in
-[`diagrams/assignment-concurrency.mermaid`](diagrams/assignment-concurrency.mermaid); the worker's
-decision tree in [`diagrams/worker-decision.mermaid`](diagrams/worker-decision.mermaid).
+The worker's decision tree — reuse, schedule a new audit, defer, or give up — is drawn in
+[`diagrams/worker-decision.mermaid`](diagrams/worker-decision.mermaid); the `UNIQUE (auditor_id,
+audit_date)` branch on it is where a lost race is caught.
 
 ---
 
