@@ -85,7 +85,8 @@ audit. Identified, not built.
 **Decision.** `POST /audit-requests` persists the request as `PENDING` and returns immediately. A
 background worker performs assignment. The request row **is** the queue.
 
-Full rationale and rejected alternatives: [ADR 0001](adr/0001-asynchronous-assignment.md).
+Full rationale and rejected alternatives: [ADR 0001](adr/0001-asynchronous-assignment.md). The
+concurrency picture as one narrative: [`05 · Concurrency`](05-concurrency.md).
 
 **Why asynchronous.** Not for latency. Moving assignment out of the request path lets the system
 control the degree of parallelism. With a single writer, assignments serialise and proportional
