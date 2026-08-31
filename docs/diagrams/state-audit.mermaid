@@ -1,0 +1,7 @@
+stateDiagram-v2
+    [*] --> SCHEDULED: worker creates the audit
+    SCHEDULED --> IN_PROGRESS: audit date passes (daily sweep)
+    SCHEDULED --> DISCARDED: last attached request cancelled
+    IN_PROGRESS --> PUBLISHED: report uploaded (publication endpoint)
+    PUBLISHED --> [*]
+    DISCARDED --> [*]

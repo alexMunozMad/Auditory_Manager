@@ -1,0 +1,10 @@
+stateDiagram-v2
+    [*] --> PENDING: request accepted
+    PENDING --> SCHEDULED: attach to an audit (new or reused)
+    PENDING --> UNSCHEDULABLE: latest_audit_date passed, no placement
+    PENDING --> CANCELLED: withdrawn (ops path)
+    SCHEDULED --> FULFILLED: audit PUBLISHED and access date reached
+    SCHEDULED --> CANCELLED: withdrawn (ops path)
+    FULFILLED --> [*]
+    UNSCHEDULABLE --> [*]
+    CANCELLED --> [*]

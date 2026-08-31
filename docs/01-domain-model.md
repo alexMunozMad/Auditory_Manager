@@ -178,7 +178,10 @@ range is an expensive column.
 
 ## 5 · State machines
 
-Two of them, advancing independently. That independence is what makes many requests per audit
+Two of them, advancing independently — drawn in
+[`diagrams/state-audit-request.mermaid`](diagrams/state-audit-request.mermaid) and
+[`diagrams/state-audit.mermaid`](diagrams/state-audit.mermaid). That independence is what makes many
+requests per audit
 possible.
 
 ### Audit request

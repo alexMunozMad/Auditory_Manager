@@ -210,9 +210,9 @@ A safety net never observed catching anything has not been shown to work. Testco
 in-memory database: the design delegates two guarantees to the engine — partial unique indexes under
 concurrency and `SKIP LOCKED` — and an in-memory store reproduces neither (testing strategy · `06`).
 
-The "concurrency becomes scheduling" shape — N requests, one worker, the constraint as backstop — is
-drawn in [`diagrams/assignment-concurrency.mermaid`](diagrams/assignment-concurrency.mermaid); the
-worker's decision tree in [`diagrams/worker-decision.mermaid`](diagrams/worker-decision.mermaid).
+The collision itself — two workers, the constraint, what the loser does — is drawn in
+[`diagrams/assignment-concurrency.mermaid`](diagrams/assignment-concurrency.mermaid); the worker's
+decision tree in [`diagrams/worker-decision.mermaid`](diagrams/worker-decision.mermaid).
 
 ---
 
