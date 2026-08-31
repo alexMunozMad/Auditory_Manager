@@ -44,4 +44,4 @@ tenancy.
 | 06 | [`testing-strategy`](docs/06-testing-strategy.md) | the pyramid, and the test that proves it |
 | 07 | [`out-of-scope`](docs/07-out-of-scope.md) | what was deliberately not built, and why |
 | — | [`adr/`](docs/adr/) | 0001 async assignment · 0002 audit trail · 0003 no optimistic locking |
-| — | [`diagrams/`](docs/diagrams/) | system context · ER model · request lifecycle and events · worker decision · audit-request states · audit states |
+| — | [`diagrams/`](docs/diagrams/) | [system context](docs/diagrams/context.md) · ER model · request lifecycle and events · worker decision · audit-request states · audit states |
