@@ -1,21 +1,9 @@
-sequenceDiagram
-    autonumber
-    participant WA as Worker - txn A
-    participant WB as Worker - txn B
-    participant Q as audit_request queue
-    participant AU as audit
-    participant IX as UNIQUE auditor_id + audit_date
-
-    WA->>Q: claim req-1 - FOR UPDATE SKIP LOCKED
-    WB->>Q: claim req-2 - skips req-1
-    Note over WA,WB: both windows contain 2026-10-05;<br/>both see auditor 7 free and least loaded
-    WA->>AU: INSERT audit (auditor 7, 2026-10-05)
-    WB->>AU: INSERT audit (auditor 7, 2026-10-05)
-    AU->>IX: check
-    IX-->>WA: OK - row committed
-    IX-->>WB: error 23505 - unique_violation
-    WB->>WB: catch, move to next candidate (auditor 8)
-    WB->>AU: INSERT audit (auditor 8, 2026-10-05)
-    AU->>IX: check
-    IX-->>WB: OK
-    Note over WA,WB: zero double bookings - the database arbitrated, not the code
+flowchart LR
+    R1["request 1"] --> Q[("audit_request<br/>= the queue")]
+    R2["request 2"] --> Q
+    RN["request N"] --> Q
+    Q -->|"FOR UPDATE SKIP LOCKED<br/>one at a time"| W["single worker"]
+    W -->|"reads the workload figure<br/>with no competition"| P["place: earliest free date,<br/>least-loaded auditor"]
+    P --> C{"UNIQUE auditor_id + audit_date"}
+    C -->|ok| D["audit_request SCHEDULED"]
+    C -->|"lost the race"| P

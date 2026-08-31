@@ -59,12 +59,18 @@ Business transaction
   ├─ state change            ┐
   └─ insert outbox_event     ┘ same transaction — atomic
 
-Relay (separate process)
-  └─ reads unpublished outbox rows → publishes → marks published
+Relay (separate process, the single reader of the outbox)
+  └─ reads unpublished rows → publishes to the broker → marks published
 
-Audit service (own database, own retention, own access control)
-  └─ consumes, deduplicates by event id, stores immutably
+Broker fans out to the subscribers:
+  ├─ Audit service   — own database, own retention, own access control
+  ├─ Notification consumer  (04 §5) — co-deployed
+  └─ Client webhooks (future)
 ```
+
+The outbox is the reliable event log; the audit service is its first subscriber, not its
+definition. `from`/`to` state travels in `payload`; `actor` is a column so every subscriber reads
+*who decided this* the same way.
 
 ```sql
 CREATE TABLE outbox_event (
@@ -72,11 +78,9 @@ CREATE TABLE outbox_event (
     aggregate_type  text        NOT NULL,
     aggregate_id    uuid        NOT NULL,
     event_type      text        NOT NULL,
-    from_state      text,
-    to_state        text,
     actor           text        NOT NULL,
     payload         jsonb       NOT NULL,
-    occurred_at     timestamptz NOT NULL,
+    occurred_at     timestamptz NOT NULL DEFAULT now(),
     published_at    timestamptz
 );
 ```

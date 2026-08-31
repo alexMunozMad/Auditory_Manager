@@ -186,7 +186,8 @@ here rather than discovered later.
 ## 8 · The event leaves by transactional outbox
 
 Every state transition writes an `outbox_event` row **in the same transaction** as the change
-(A8, ADR 0002). A relay publishes to the broker afterwards.
+(A8, ADR 0002). A single relay publishes each row to the broker afterwards, which fans out to the
+audit-trail service, the notification consumer and future webhooks (04 §1).
 
 If the event were published inside the business transaction, a broker timeout would roll back a
 sound assignment; if it were published by a downstream consumer after commit and the message were
@@ -209,9 +210,9 @@ A safety net never observed catching anything has not been shown to work. Testco
 in-memory database: the design delegates two guarantees to the engine — partial unique indexes under
 concurrency and `SKIP LOCKED` — and an in-memory store reproduces neither (testing strategy · `06`).
 
-The race and its resolution are drawn in
-[`diagrams/assignment-concurrency.mermaid`](diagrams/assignment-concurrency.mermaid); the worker's
-decision tree in [`diagrams/worker-decision.mermaid`](diagrams/worker-decision.mermaid).
+The "concurrency becomes scheduling" shape — N requests, one worker, the constraint as backstop — is
+drawn in [`diagrams/assignment-concurrency.mermaid`](diagrams/assignment-concurrency.mermaid); the
+worker's decision tree in [`diagrams/worker-decision.mermaid`](diagrams/worker-decision.mermaid).
 
 ---
 

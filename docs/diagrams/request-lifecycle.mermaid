@@ -4,36 +4,38 @@ sequenceDiagram
     participant API as HTTP API
     participant DB as audit_request / audit
     participant OB as outbox_event
+    participant BR as Relay and broker
     participant WK as Assignment worker
-    participant NT as Notification module
-    participant OPS as Report upload (internal)
+    participant NT as Notification consumer
 
     CL->>API: POST /v1/audit-requests (siteId)
     API->>DB: INSERT audit_request (PENDING, window frozen)
     API->>OB: INSERT AuditRequestCreated (same transaction)
-    API--)DB: NOTIFY assignment_pending
+    API--)WK: NOTIFY assignment_pending
     API-->>CL: 201 PENDING + commitment
-    OB--)NT: AuditRequestCreated
+    OB--)BR: relay publishes every row
+    Note over BR: broker fans out to the audit-trail service,<br/>the notification consumer and webhooks
+    BR--)NT: AuditRequestCreated
     NT->>CL: email - request received
 
     WK->>DB: claim PENDING (FOR UPDATE SKIP LOCKED)
     WK->>DB: reuse check - two reads (in-flight, published)
     alt reusable audit
-        WK->>DB: audit_request SCHEDULED, audit_id set
+        WK->>DB: audit_request SCHEDULED, set audit_id
     else none
         WK->>DB: INSERT audit (least-loaded auditor, earliest date)
         WK->>DB: audit_request SCHEDULED
     end
     WK->>OB: INSERT AuditRequestScheduled
-    OB--)NT: AuditRequestScheduled
+    OB--)BR: relay publishes
+    BR--)NT: AuditRequestScheduled
     NT->>CL: email - audit scheduled
 
-    Note over OPS,DB: weeks later
-    OPS->>API: POST /internal/v1/audits/:id/publication (reportUri)
-    API->>DB: audit PUBLISHED, published_at, valid_until
+    Note over API,DB: weeks later - internal endpoint
+    API->>DB: audit PUBLISHED (published_at, valid_until)
     API->>OB: INSERT AuditPublished (same transaction)
     API->>DB: fan-out - attached requests due become FULFILLED
     API->>OB: INSERT AuditRequestFulfilled (per request)
-    API-->>OPS: 200
-    OB--)NT: AuditRequestFulfilled
+    OB--)BR: relay publishes
+    BR--)NT: AuditRequestFulfilled
     NT->>CL: email - report ready

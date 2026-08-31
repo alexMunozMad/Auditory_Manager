@@ -245,11 +245,21 @@ CREATE TABLE outbox_event (
     aggregate_type  text        NOT NULL,
     aggregate_id    uuid        NOT NULL,
     event_type      text        NOT NULL,
+    actor           text        NOT NULL,
     payload         jsonb       NOT NULL,
     occurred_at     timestamptz NOT NULL DEFAULT now(),
     published_at    timestamptz
 );
 ```
+
+**The outbox is the reliable event log, not the trail.** Every state transition writes a row here in
+its own transaction; a single relay publishes each row to the broker, which fans out to the
+audit-trail service (its own database — ADR 0002), the notification consumer (§04, §8), and future
+webhooks. "Audit trail" is the first subscriber, not the definition.
+
+**`actor` is a column, not a payload field.** The trail has to answer *who decided this* — a client,
+an operator, a named system process (ADR 0002). Keeping it out of `payload` means every consumer
+reads it the same way. Any `from`/`to` state does live in `payload`.
 
 **`aggregate_id` deliberately has no foreign key.** It must be able to record facts about rows that
 are one day archived. An event that disappears along with the row it describes is worthless as
@@ -419,15 +429,15 @@ that the single-writer worker exists to avoid (ADR 0001). The index it needs alr
 
 ---
 
-## 8 · Notification component
+## 8 · Notification consumer
 
-A separate concern in the **same application** (§04): an in-process module that reads the outbox and
-sends the assignment and report-ready emails. It keeps one table for delivery idempotency. Listed
-here so the schema is complete; it is not part of the scheduling model.
+A separate concern in the **same application** (§04): a broker subscriber that sends the assignment
+and report-ready emails. It does not read the outbox — the relay does. It keeps one table for
+delivery idempotency. Listed here so the schema is complete; it is not part of the scheduling model.
 
 ```sql
 CREATE TABLE notification_dispatch (
-    event_id    uuid        PRIMARY KEY,   -- the outbox event that triggered the send
+    event_id    uuid        PRIMARY KEY,   -- the event that triggered the send
     channel     text        NOT NULL,      -- 'email'
     recipient   text        NOT NULL,
     status      text        NOT NULL,      -- CLAIMED | SENT | FAILED
@@ -438,8 +448,9 @@ CREATE TABLE notification_dispatch (
 );
 ```
 
-`event_id` as primary key **is** the concurrency control: N application instances race with
-`INSERT … ON CONFLICT (event_id) DO NOTHING`, and only the row's creator sends the email. Delivery
-is at-least-once — a crash between sending and marking `SENT` resends — so a rare duplicate is
-possible, a lost notification is not. It sits in this schema because it is this application's table,
-not an external service's — the ADR 0002 rule about the trail does not apply to a sent-log. See §04.
+`event_id` as primary key **is** the concurrency control: N consumer instances race with
+`INSERT … ON CONFLICT (event_id) DO NOTHING` across at-least-once broker redeliveries, and only the
+row's creator sends the email. A crash between sending and marking `SENT` resends — so a rare
+duplicate is possible, a lost notification is not. It sits in this schema because it is this
+deployment's send-ledger, not an external service's — the ADR 0002 rule about the trail does not
+apply. See §04.
