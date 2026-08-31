@@ -112,7 +112,8 @@ trail must not be deletable by its producer does not apply to a "which emails di
 | `AuditRequestFulfilled` | "Your report is ready." — the brief's *report delivery* notification |
 | `AuditRequestUnschedulable` | "We could not schedule your audit within the committed window." |
 
-The channel — templating, the email provider — is out of scope, behind a `NotificationSender` seam.
+The channel — templating, the email provider, retry, per-client preferences — is out of scope,
+behind a `NotificationSender` seam (07 §9).
 
 **Concurrency.** This is the concurrency question the brief attaches to notifications: many events
 arriving fast, several application instances each polling the outbox, and the requirement that no
@@ -142,5 +143,5 @@ a client-registered URL with retry and a signature header. It is the one consume
 through the broker rather than in-process, because it is genuinely external.
 
 Not built because it adds endpoint registration, secret management, retry/back-off and a dead-letter
-path to reach the same clients that polling and email already reach. The events are in the outbox;
-when it is built it is a subscriber, not a change to this system.
+path to reach the same clients that polling and email already reach (07 §8). The events are in the
+outbox; when it is built it is a subscriber, not a change to this system.

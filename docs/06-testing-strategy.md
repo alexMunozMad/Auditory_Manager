@@ -1,5 +1,11 @@
 # 06 · Testing strategy
 
+**The strategy is stack-agnostic** — it is about *what* is tested at *which* level and *why*. The
+concrete tool names in this document (JUnit, Mockito, Testcontainers, Awaitility, JaCoCo, and the
+Spring / Liquibase context they run in) are the instrumentation chosen for the step-2 slice, not
+part of the design. Every other document in this repository is stack-agnostic; this one names tools
+because a testing plan has to.
+
 A real pyramid, not a diamond. Most tests are unit tests of a domain that needs almost no mocking. A
 thinner band of integration tests covers exactly what only Postgres can prove. A handful of API
 tests. **One concurrency test that is the whole point.**
@@ -168,5 +174,12 @@ application logic is wrong; retries do not create a second commitment; a slipped
 fulfil a request early.
 
 **Does not prove:** throughput or latency under load; real broker delivery semantics (the relay and
-consumers are tested against a stub); authentication and tenancy (out of scope, A10 / 03 §7). Stated
-so the boundary of the evidence is explicit.
+consumers are tested against a stub); authentication and tenancy (out of scope, A10 / 03 §7).
+
+It also does not prove that every *accepted* request's contractual ceiling is met. The one
+identified case where it is not — a tight Premium ceiling against a site's in-flight audit (A7,
+`07 §2`) — is accepted knowingly and surfaces as an `AuditRequestUnschedulable` event, not as a
+test failure. Preventing it at acceptance time is the deferred evolution, not a defect the suite
+should catch.
+
+Stated so the boundary of the evidence is explicit.

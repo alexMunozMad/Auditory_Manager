@@ -162,7 +162,7 @@ terminal transition; the other is a second complete problem.
 State transitions originate from specific states rather than a wildcard, so the remaining cases stay
 additive.
 
-**Intended policy**, sketched in `07-out-of-scope.md`:
+**Intended policy**, detailed in [`07 · Out of scope`](07-out-of-scope.md):
 
 | Trigger | Policy |
 |---|---|

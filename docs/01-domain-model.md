@@ -278,44 +278,14 @@ to the event that changes the outcome, and keep a sweep for what only time resol
 ## 6 · Identified and deliberately not built
 
 Each of these is a case the design surfaced and answered on paper. Building them is an evolution,
-not a correction.
+not a correction. The full reasoning is in [`07 · Out of scope`](07-out-of-scope.md); the shape of
+each in one line:
 
-### Pulling an in-flight audit forward
-
-An audit is scheduled to publish on 01/12/2026. A Premium client requests on 01/09/2026 with a
-ceiling of 01/10/2026. The existing audit publishes too late for them, and a second audit would
-overlap the site's validity (A7). Today that request stays `PENDING` and eventually expires as
-`UNSCHEDULABLE`.
-
-**The fix, when it is built:** move the in-flight audit earlier rather than create a second one. It
-is safe in one direction only — `available_to_client_at = max(published_at, requested_at +
-min_window)`, so an earlier publication either leaves each attached client's access date unchanged
-or improves it, and no ceiling can be breached. Moving later would push every attached request out
-at once.
-
-The rule underneath: **while the audit has not occurred its date is negotiable; once it has occurred
-its validity is fixed.**
-
-Not built because it adds a third branch to the assignment worker and a minimum-notice policy toward
-the auditor, in exchange for an edge case. The failure mode meanwhile is visible, not silent: the
-request expires with an event.
-
-### Auditor eligibility
-
-Any auditor can audit any site (A3). No interface with a single pass-through implementation is
-introduced for this — that would be structure without content. When qualifications appear, they
-enter as a filter applied before selection, and the concurrency design is untouched: a smaller pool
-does not change how competition for a date is arbitrated.
-
-### Report structure
-
-The report is `published_at` plus a document reference on `Audit`. It has no lifecycle of its own:
-produced by one audit, published once, meaningless detached from it. If findings, versions or
-signatures appear, it becomes a separate row that still belongs to its audit and is still written in
-the same transaction.
-
-### Weighted distribution
-
-"Proportionally" is read as least loaded by audit count (A2). Selection sits behind
-`AuditorSelectionPolicy`, the one interface kept, because it is the single point where an answer to
-that question could change without anything else moving.
+| Not built | Shape of the answer |
+|---|---|
+| Rescheduling a committed audit (auditor unavailable, processing delay) | A second complete problem — fairness recalculation, event compensation. Cancellation of a *request* is in scope; moving an audit others rely on is not (A5). |
+| Pulling an in-flight audit forward | The one accepted request whose ceiling may be missed: a tight Premium ceiling against a site's in-flight audit. Today it expires as `UNSCHEDULABLE` with an event. The fix is safe in one direction only. |
+| Auditor eligibility / qualifications | A filter before selection; the concurrency design is untouched. No pass-through interface for a rule that does nothing yet. |
+| Report structure (findings, versions, signatures) | Becomes a row that still belongs to its audit, still written in the same transaction. Today it is a date plus a document reference. |
+| Weighted distribution | An `AuditorSelectionPolicy` swap — the one interface kept, for exactly this. |
+| Variable durations | Localised changes to slot representation and window arithmetic (A1). |
