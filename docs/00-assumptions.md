@@ -204,8 +204,9 @@ domain. When levels are negotiated per client they become data, and the enum bec
 
 A table of dated subscription periods would be a **third copy of history that already exists twice**:
 the level under which each request was accepted is frozen on the request itself, and every change of
-level is recorded as a `SubscriptionChanged` event in the audit trail (A8). Three records of one
-fact is three chances for them to disagree.
+level is recorded as a `SubscriptionChanged` event by the system that owns the client record — which
+this one consumes for the trail but does not produce, since `client` is read-only here (A10, §04).
+Three records of one fact is three chances for them to disagree.
 
 **Derived dates are frozen, not recomputed.** `latest_audit_date` and `available_to_client_at` are
 stored as resolved dates on the request, never recalculated at query time from the tier parameters.

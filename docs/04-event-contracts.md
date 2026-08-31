@@ -3,16 +3,31 @@
 The synchronous contract is [`03`](03-api-contracts.md). This is what leaves the system
 asynchronously: the audit trail (A8), the notification emails, and — later — client webhooks.
 
-**One mechanism.** Every event is written to `outbox_event` in the same transaction as the state
-change that produced it (A8). A relay publishes unpublished rows to the broker. Every consumer is
-**idempotent by `eventId`**; delivery is **at-least-once**. There is no "exactly once" — a consumer
-that must not act twice keeps its own dedup key (the notification component does, §4).
+---
+
+## 1 · One outbox, three delivery paths
+
+Every event is written to `outbox_event` in the same transaction as the state change that produced
+it (A8). Where it goes from there depends on who needs it:
+
+| Path | Carries | Consumers |
+|---|---|---|
+| **Relay → broker** | every outbox row | the external **audit-trail service** (ADR 0002); future client webhooks |
+| **In-process handlers** | a subset, read from the outbox with their own cursor (`SKIP LOCKED`) | the **fulfilment fan-out**; the **notification component** (§4) |
+| **`LISTEN/NOTIFY`** | capacity signals only | the **assignment worker** (ADR 0001) |
+
+The broker is only for consumers that must be **decoupled from this deployment** — a service with
+its own database and lifecycle. Everything else runs in this application and reads the outbox
+directly. A signal this system both produces and consumes (`AuditSlotReleased`) uses `NOTIFY`, not a
+broker round-trip.
+
+Every consumer is **idempotent by `eventId`**; delivery is **at-least-once**. There is no
+"exactly once" — a consumer that must not act twice keeps its own dedup key (the notification
+component does, §4).
 
 ---
 
-## 1 · The envelope
-
-Every event carries the same outer shape; `payload` varies by type.
+## 2 · The envelope
 
 ```json
 {
@@ -30,7 +45,7 @@ relay time. `payload` is `jsonb` in the outbox and JSON on the wire.
 
 ---
 
-## 2 · Events this system produces
+## 3 · Events this system produces
 
 | Event | Aggregate | Trigger | Payload | Consumers |
 |---|---|---|---|---|
@@ -42,41 +57,53 @@ relay time. `payload` is `jsonb` in the outbox and JSON on the wire.
 | `AuditScheduled` | `audit` | a new `audit` row is created | `auditId, siteId, auditorId, auditDate` | trail |
 | `AuditPublished` | `audit` | `POST /internal/v1/audits/{id}/publication` | `auditId, siteId, publishedAt, validUntil` | trail; fulfilment fan-out (in-process) |
 | `AuditDiscarded` | `audit` | last attached request cancelled | `auditId, siteId, auditDate` | trail |
-| `AuditSlotReleased` | `audit` | discard frees a committed date | `auditorId, date` | the assignment worker |
+| `AuditSlotReleased` | `audit` | a discard frees a committed date | `auditorId, date` | trail (via broker); **the assignment worker (via `NOTIFY`, §1)** |
+
+**`AuditSlotReleased` does not round-trip the broker to reach the worker.** It is produced and
+consumed inside this system: the discard `NOTIFY`s the worker in the same transaction (ADR 0001). It
+is still written to the outbox — a released auditor-day is an auditable fact — so the trail gets it
+via the relay like everything else. Two paths, one event. This is unlike the two external capacity
+events (§4), which have no shortcut, and unlike `AuditRequestCancelled`, which is an in-transaction
+domain event coordinating two aggregates rather than a signal to the assignment loop.
 
 **`auditId` appears in `AuditRequestScheduled`.** Its consumers — the trail and the notification
-component — are trusted internal services. A future *webhook* projection (§5) strips `auditId` and
-anything about co-requesters before anything reaches a client (A7).
+component — are trusted internal code. A future *webhook* projection (§5) strips `auditId` and
+anything about co-requesters before it reaches a client (A7).
 
 **`AuditPublished` does not notify clients directly.** It triggers the in-process fan-out that moves
-attached requests to `FULFILLED`; each of those emits its own `AuditRequestFulfilled`, which is the
+attached requests to `FULFILLED`; each emits its own `AuditRequestFulfilled`, which is the
 client-facing event. A raw `AuditPublished` would notify clients whose minimum window has not
 elapsed.
 
 ---
 
-## 3 · Events this system consumes · integration contracts
+## 4 · Events this system consumes · integration contracts
 
-Produced by contexts outside this scope; this system subscribes to them. Documented because the
-shape it expects to receive is as much a contract as the shape it sends.
+Produced by contexts outside this scope; a **broker consumer** in this application subscribes and
+calls the relevant internal handler. Documented because the shape this system expects to receive is
+as much a contract as the shape it sends.
 
 | Event | Payload expected | Effect here |
 |---|---|---|
 | `AuditorOnboarded` | `auditorId, activeFrom` | Worker retries pending requests whose window is still open |
 | `AuditorAvailabilityOpened` | `auditorId, date` | Worker retries pending requests whose window contains `date` |
-| `SubscriptionChanged` | `clientId, newLevel, effectiveFrom` | Informational only — levels are frozen on the request (A9), so scheduling ignores it. Recorded for the trail. |
+| `SubscriptionChanged` | `clientId, newLevel, effectiveFrom` | Informational only — levels are frozen on the request (A9, A6), so scheduling ignores it; recorded for the trail |
 
 Each is consumed idempotently by `eventId`; a replay is a no-op because the worker's query returns
 nothing new.
 
 ---
 
-## 4 · The notification component
+## 5 · The notification component
 
-A **separate consumer of the broker**, not a new mechanism — the same argument as the audit trail
-(A8): the events already exist, delivering them as email is one more subscriber.
+An **in-process module of this application**, not a separate service. It reads the outbox with its
+own cursor (`SKIP LOCKED`, alongside the relay), sends one email per event, and records the send in
+`notification_dispatch` (§02). No broker is involved — it consumes the outbox directly.
 
-**What it sends.** One email per event, to `client.contact_email`:
+Its table lives in this schema legitimately: it is this application's, and the ADR 0002 rule that a
+trail must not be deletable by its producer does not apply to a "which emails did we send" log.
+
+**What it sends**, to `client.contact_email`:
 
 | Event | Email |
 |---|---|
@@ -88,31 +115,31 @@ A **separate consumer of the broker**, not a new mechanism — the same argument
 The channel — templating, the email provider — is out of scope, behind a `NotificationSender` seam.
 
 **Concurrency.** This is the concurrency question the brief attaches to notifications: many events
-arriving fast, several consumer instances, and the requirement that no client email is lost and
-near-none is duplicated.
+arriving fast, several application instances each polling the outbox, and the requirement that no
+client email is lost and near-none is duplicated.
 
 ```sql
 -- claim, then send
 INSERT INTO notification_dispatch (event_id, channel, recipient, status)
 VALUES ($1, 'email', $2, 'CLAIMED')
 ON CONFLICT (event_id) DO NOTHING;
--- if a row was inserted: send the email, then UPDATE status = 'SENT', sent_at = now()
--- if not: another instance owns this event — skip
+-- a row was inserted  → send the email, then UPDATE status = 'SENT', sent_at = now()
+-- no row was inserted  → another instance owns this event, skip
 ```
 
-`event_id` is the primary key of `notification_dispatch` (§02), so the claim is atomic across
-instances. Exactly one instance sends. A crash between the send and the `SENT` update leaves the row
-`CLAIMED`; a sweep re-sends it — **at-least-once**, so a rare duplicate email is possible and a lost
-one is not. Stating it plainly: there is no exactly-once here, and claiming otherwise would be the
-wrong answer.
+`event_id` is the primary key of `notification_dispatch`, so the claim is atomic across instances —
+exactly one sends. A crash between the send and the `SENT` update leaves the row `CLAIMED`; a sweep
+re-sends it. **At-least-once**: a rare duplicate email is possible, a lost one is not. There is no
+exactly-once here, and claiming otherwise would be the wrong answer.
 
 ---
 
-## 5 · Client webhooks · not built
+## 6 · Client webhooks · not built
 
-A webhook consumer is a **projection of the `audit_request` events** in §2 — `Created`, `Scheduled`,
+A webhook consumer is a **projection of the `audit_request` events** in §3 — `Created`, `Scheduled`,
 `Fulfilled`, `Unschedulable` — with `auditId` and every trace of co-requesters removed, delivered to
-a client-registered URL with retry and a signature header.
+a client-registered URL with retry and a signature header. It is the one consumer that would go
+through the broker rather than in-process, because it is genuinely external.
 
 Not built because it adds endpoint registration, secret management, retry/back-off and a dead-letter
 path to reach the same clients that polling and email already reach. The events are in the outbox;

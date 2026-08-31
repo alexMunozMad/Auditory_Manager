@@ -62,8 +62,12 @@ Worker loop:
    FOR UPDATE SKIP LOCKED
    LIMIT n
 
-  1. reuse check   → valid audit for site_id with
-                     available_to_client_at ≤ valid_until AND ≤ deadline?  → attach, done
+  1. reuse check   → two reads for site_id (02 §6):
+                       - the one possible in-flight audit (index 2); validity projected
+                         as audit_date + processing_duration + 1 year
+                       - the current published audit (index 3); real valid_until
+                     does either satisfy  available_to_client_at ≤ validity  AND  ≤ deadline?
+                     → attach, done
   2. otherwise     → earliest free date in window, least loaded auditor
                      window floored by previous_audit.valid_until + 1 day
   3. unique violation → next candidate
@@ -90,11 +94,17 @@ construction, and choosing its value would be arbitrary.
 
 The outcome changes only when capacity appears:
 
-| Event | Source |
-|---|---|
-| `AuditSlotReleased` | Cancellation frees a committed date |
-| `AuditorAvailabilityOpened` | Unavailability withdrawn, calendar extended |
-| `AuditorOnboarded` | New auditor added to the pool |
+| Event | Source | Reaches the worker via |
+|---|---|---|
+| `AuditSlotReleased` | This system — a discard frees a committed date | `NOTIFY`, same transaction as the discard |
+| `AuditorAvailabilityOpened` | An external context | broker consumer → same handler |
+| `AuditorOnboarded` | An external context | broker consumer → same handler |
+
+`AuditSlotReleased` is produced here and consumed here, so it does not round-trip the broker: the
+discard `NOTIFY`s the worker directly (§04). It is still written to the outbox, because a released
+auditor-day is an auditable fact the trail wants — but the trail record and the worker's wake-up are
+two different paths for one event. The two external capacity events have no such shortcut and arrive
+through a broker consumer that calls the same internal handler.
 
 Each carries `(auditor_id, date)`, so the worker queries only pending requests whose interval
 contains that date — a targeted lookup, not a full rescan. A daily sweep catches missed
@@ -122,9 +132,10 @@ auditor capacity, so it is the first branch in the loop. Under duplicate demand 
 largest reduction in auditor workload the system can make.
 
 **Serialisation also protects the site calendar.** Choosing between attaching to an existing audit
-and creating a new one is a read-then-decide sequence, and the floor at the previous audit's expiry
-is computed from what the read returned. Running assignments serially means that decision is never
-made on a stale view — a second, independent reason for the single writer beyond fairness.
+and creating a new one is a reads-then-decide sequence — the in-flight audit and the published one
+(02 §6) — and the floor at the previous audit's expiry is computed from what those reads returned.
+Running assignments serially means that decision is never made on a stale view — a second,
+independent reason for the single writer beyond fairness.
 
 **The API contract changes shape.** The client receives `PENDING` and must poll
 `GET /audit-requests/{id}` or consume `AuditRequestScheduled` (§04). A real cost of the decision,

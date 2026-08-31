@@ -32,8 +32,9 @@ Two distinctions carry most of the design:
 
 ## 2 · Entities
 
-**This system writes `AuditRequest` and `Audit`, appends to the `Supplier`/`Site` catalogue, and
-reads the rest.**
+**This system writes four tables and reads two.** `AuditRequest` and `Audit` have a full lifecycle;
+`Supplier` and `Site` are a catalogue it only ever inserts into (A10). `Client` and `Auditor` are
+read-only.
 
 | Written here | Owns | References by id |
 |---|---|---|
@@ -226,8 +227,9 @@ configurable margin, no arbitrary number to defend.
 Something has to record that the visit will not happen: otherwise the auditor stays booked for a day
 nobody wants and the slot is never released. Deleting the row is not an option (A8).
 
-The date is released as an `AuditSlotReleased` event, which wakes the worker for other pending
-requests (A4).
+The date is released as an `AuditSlotReleased` event: written to the outbox for the trail, and a
+`NOTIFY` in the same transaction that wakes the worker for other pending requests — it is produced
+and consumed inside this system, so it does not go out to the broker and back (A4, §04).
 
 **"Too late to reassign" needs no rule.** A slot freed for today cannot be taken by anyone: the
 earliest admissible audit date is tomorrow even for Premium (A1), so the event finds no candidate

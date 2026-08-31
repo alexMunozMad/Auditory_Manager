@@ -155,6 +155,8 @@ CREATE TABLE audit_request (
         CHECK (earliest_audit_date > (requested_at AT TIME ZONE 'UTC')::date),
     CONSTRAINT request_attached_has_audit
         CHECK (status NOT IN ('SCHEDULED', 'FULFILLED') OR audit_id IS NOT NULL),
+    CONSTRAINT request_scheduled_has_access_date
+        CHECK (status NOT IN ('SCHEDULED', 'FULFILLED') OR available_to_client_at IS NOT NULL),
     CONSTRAINT request_cancelled_has_reason
         CHECK (status <> 'CANCELLED' OR cancellation_reason IS NOT NULL)
 );
@@ -198,6 +200,12 @@ and reachable only through an operations path. That is exactly why the invariant
 database: the one writer that *does* reach these states is a hand-run script or console, one
 forgotten `SET cancellation_reason` away from a half-recorded withdrawal. The state machine is
 complete; the HTTP surface is a deliberate subset, not the edge of the model.
+
+**`SCHEDULED` and `FULFILLED` imply an access date.** `request_scheduled_has_access_date` mirrors
+`request_attached_has_audit`: attach sets `audit_id` and `available_to_client_at` in one statement,
+and a scheduled request missing either is a half-built row. Publication only ever updates
+`available_to_client_at` to another non-null value, so the invariant holds for the terminal state
+too.
 
 **`available_to_client_at` is stored although it is derivable.** It could be computed as
 `max(audit.published_at, requested_at + min_window)` at query time. It is stored because it is the
@@ -411,10 +419,11 @@ that the single-writer worker exists to avoid (ADR 0001). The index it needs alr
 
 ---
 
-## 8 · Outside the scheduling domain
+## 8 · Notification component
 
-The notification component (§04) keeps its own table for delivery idempotency. It is not part of the
-scheduling model — listed here only so the schema is complete.
+A separate concern in the **same application** (§04): an in-process module that reads the outbox and
+sends the assignment and report-ready emails. It keeps one table for delivery idempotency. Listed
+here so the schema is complete; it is not part of the scheduling model.
 
 ```sql
 CREATE TABLE notification_dispatch (
@@ -429,7 +438,8 @@ CREATE TABLE notification_dispatch (
 );
 ```
 
-`event_id` as primary key **is** the concurrency control: N consumer instances race with
+`event_id` as primary key **is** the concurrency control: N application instances race with
 `INSERT … ON CONFLICT (event_id) DO NOTHING`, and only the row's creator sends the email. Delivery
 is at-least-once — a crash between sending and marking `SENT` resends — so a rare duplicate is
-possible, a lost notification is not. See §04.
+possible, a lost notification is not. It sits in this schema because it is this application's table,
+not an external service's — the ADR 0002 rule about the trail does not apply to a sent-log. See §04.
