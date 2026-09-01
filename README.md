@@ -5,8 +5,9 @@ auditor and a date under three simultaneous constraints — **one auditor per si
 **proportional distribution across auditors**, and **a delivery window set by the subscription
 level** — and publishes the resulting report.
 
-This repository is the **design** for one part of that problem, covered in depth, plus a slice of
-implementation as evidence.
+This repository is the **design** for one part of that problem, covered in depth (`docs/`), plus a
+slice of implementation as evidence (`service/` — Java 25, Spring Boot 4, `./mvnw test`, needs
+Docker for Testcontainers).
 
 ## Scope
 
@@ -43,5 +44,5 @@ tenancy.
 | 05 | [`concurrency`](docs/05-concurrency.md) | the centre of the design, as one narrative |
 | 06 | [`testing-strategy`](docs/06-testing-strategy.md) | the pyramid, and the test that proves it |
 | 07 | [`out-of-scope`](docs/07-out-of-scope.md) | what was deliberately not built, and why |
-| — | [`adr/`](docs/adr/) | 0001 async assignment · 0002 audit trail · 0003 no optimistic locking |
+| — | [`adr/`](docs/adr/) | 0001 async assignment · 0002 audit trail · 0003 no optimistic locking · 0004 no JPA |
 | — | [`diagrams/`](docs/diagrams/) | system context ([legend](docs/diagrams/context-legend.md)) · ER model · request lifecycle and events · worker decision · audit-request states · audit states |

@@ -42,12 +42,15 @@ Do not break these without the user's explicit approval **in the same message**.
 
 ## Stack (locked)
 
-Java 25 · Spring Boot 4 · Gradle · Liquibase · PostgreSQL 18.
+Java 25 · Spring Boot 4 · Maven · Liquibase · PostgreSQL 18.
 
 **Liquibase: don't pin a version.** Let Spring Boot's dependency-management BOM resolve it.
 (Verified: Spring Boot 4.1.1's BOM manages `liquibase-core:5.0.3` — "5" is real, not a typo carried
 over from the sibling challenge — but the point stands regardless of the number: pinning it
-ourselves is how half an hour gets lost arguing with Gradle instead of building.)
+ourselves is how half an hour gets lost arguing with the build tool instead of building.)
+
+**Build: Maven** (`spring-boot-starter-parent`), not Gradle. Conventional in Spring shops, a
+`pom.xml` reads at a glance, and there's no build DSL to explain during the defence (rule 8).
 
 **Persistence: `JdbcClient`, no JPA/Hibernate.** Domain objects mapped to and from rows by hand.
 Not a style preference — the worker's placement loop uses a unique-constraint violation as control

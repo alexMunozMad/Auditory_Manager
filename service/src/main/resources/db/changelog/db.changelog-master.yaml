@@ -1,0 +1,23 @@
+databaseChangeLog:
+  # The schema is a transcription of docs/02-data-model.md (CLAUDE.md rule 12).
+  # The .sql files hold nothing but the DDL the doc gives; Liquibase markers stay here.
+  - changeSet:
+      id: "001-schema"
+      author: qualifyze
+      comment: Tables, CHECK constraints, business unique indexes, query indexes (docs/02 §1-§6)
+      changes:
+        - sqlFile:
+            path: 001-schema.sql
+            relativeToChangelogFile: true
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: "002-updated-at-trigger"
+      author: qualifyze
+      comment: set_updated_at() function and the two BEFORE UPDATE triggers (docs/02 §7)
+      changes:
+        - sqlFile:
+            path: 002-updated-at-trigger.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
