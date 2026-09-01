@@ -122,3 +122,38 @@ The notification component decides *which events* send an email and *to whom*. T
 templating, the email provider, delivery retry, per-client preferences, other channels — is behind
 the `NotificationSender` seam and not implemented. Swapping or extending it moves nothing in the
 event or scheduling design.
+
+---
+
+## 10 · A `DEPRECATED` audit state and a daily expiry sweep (02 §2, §6, §7)
+
+**The idea.** A once-a-day worker — the same shape as the fulfilment sweep — finds `PUBLISHED`
+audits whose `valid_until` is in the past and moves them to a new terminal state, `DEPRECATED`. It
+would be a fifth value on `audit_status_valid` and a `PUBLISHED → DEPRECATED` branch on the audit
+machine.
+
+**What it buys.** Index 3 (`(site_id, valid_until) WHERE status = 'PUBLISHED'`) would then hold only
+*currently valid* published audits, so it stays small however much history a site accumulates. The
+reuse check's first pass — "is there a live audit for this site" — becomes a pure status filter,
+and the candidate query drops one date predicate. `docs/02 §7` already expects the state set to
+grow ("`DISCARDED` arrived late"), so this is consistent with the design, not a departure from it —
+it is the same pattern as `SCHEDULED → IN_PROGRESS`, a transition driven by the passage of time and
+advanced by a sweep, not an endpoint.
+
+**Why it is not built.**
+
+- The `valid_until` **date already answers the query efficiently**. Index 3 is partial; a site's
+  live-audit lookup is one indexed row. Adding a state to keep that index lean is an optimisation
+  for a cost that has not been measured.
+- It **does not remove the date logic**. The A7 reuse condition is `available_to_client_at ≤
+  audit.valid_until`, and a request whose access date is more than a year out can miss a *still*
+  `PUBLISHED` audit. So `valid_until` stays in the eligibility check; only the "already expired as
+  of today" edge would move into the state.
+- **Eventual consistency.** Between midnight and the sweep the state lags reality, so the date
+  comparison has to remain as a backstop regardless — the query cannot actually drop it, only
+  hit it rarely.
+- It is **one more terminal state** to handle everywhere reuse, publication and the trail touch
+  `audit`, in exchange for a query optimisation rather than a new capability.
+
+**When it becomes worth it.** If the `PUBLISHED` set per site grows large enough that index 3's
+size or a date-range scan is a measured cost — a scale trigger, not an assumption.
