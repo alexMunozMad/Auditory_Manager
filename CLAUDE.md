@@ -28,7 +28,7 @@ Do not break these without the user's explicit approval **in the same message**.
 8. **Every line defensible in one sentence**, or it does not go in.
 9. **Do not chase coverage.** JaCoCo is measured, not a target (`docs/06`).
 10. **Add files by explicit path.** These gitignored personal notes must never be staged:
-    `GUION_DEFENSA.md`, `docs/99-defense-notes.md`, `QUALIFYZE_CONTEXT.md`,
+    `GUION_DEFENSA.md`, `99-defense-notes.md`, `QUALIFYZE_CONTEXT.md`,
     `PLAN_2_DIAS_QUALIFYZE.md`.
 11. **The design vocabulary is binding.** Request states are exactly `PENDING`, `SCHEDULED`,
     `FULFILLED`, `UNSCHEDULABLE`, `CANCELLED`. Audit states are exactly `SCHEDULED`, `IN_PROGRESS`,
@@ -94,16 +94,20 @@ here is built in code. Everything else in the design stays a document.
 (`POST /v1/sites`, the `GET`s, report streaming, publication), the daily fulfilment sweep, the
 real notification consumer, the real broker/relay, webhooks.
 
-**Tickets, in order:**
+**Tickets, in order.** Small and focused — one behaviour per PR, not a whole layer. A PR a
+reviewer can hold in their head.
 
 | # | Branch | Delivers |
 |---|---|---|
 | 1 | `chore/1-dev-guardrails` | done |
-| 2 | `chore/2-scaffolding` | Spring Boot + Liquibase changelog + Testcontainers wiring — 90 min timebox (see Stack) |
-| 3 | `feat/3-domain` | `SubscriptionLevel`, `DeliveryWindow`, `AuditRequest`, `Audit` |
-| 4 | `feat/4-create-request` | `POST /v1/audit-requests` + idempotency |
-| 5 | `feat/5-assignment-worker` | claim, reuse check, placement, outbox write |
-| 6 | `test/6-concurrency` | the N-threads test + drop-the-index proof |
+| 2 | `chore/2-scaffolding` | Spring Boot + Liquibase changelog + Testcontainers wiring — done |
+| 3 | `chore/3-dev-setup` | IntelliJ run config, this ticket list |
+| 4 | `feat/4-delivery-window` | `SubscriptionLevel` enum + `DeliveryWindow` value object (A1, A6 — the window arithmetic, the Premium floor, the leap-day rule) |
+| 5 | `feat/5-audit-request` | `AuditRequest` aggregate — the frozen fields, the request state machine |
+| 6 | `feat/6-audit` | `Audit` aggregate — the audit state machine, `published_at`/`valid_until` calendar arithmetic |
+| 7 | `feat/7-create-request-endpoint` | `POST /v1/audit-requests` — persist `PENDING` + outbox row, idempotency |
+| 8 | `feat/8-assignment-worker` | claim with `SKIP LOCKED`, the two-read reuse check, placement |
+| 9 | `test/9-concurrency` | the N-threads test + the drop-the-index proof |
 
 **Ticket 2's exit test proves behaviour, not presence.** Don't query the catalog for whether a
 constraint exists — insert two audits with the same auditor and date and assert the database
