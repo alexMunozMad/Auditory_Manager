@@ -25,7 +25,12 @@ replay_pid*
 
 # IDE
 .idea/
-.claude/
+
+# Claude Code: keep the shared guardrails, ignore everything else (vendored skills, local state)
+.claude/*
+!.claude/settings.json
+!.claude/hooks
+!.claude/hooks/**
 
 # Personal/local context, planning and defence notes
 QUALIFYZE_CONTEXT.md
