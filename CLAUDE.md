@@ -28,7 +28,7 @@ Do not break these without the user's explicit approval **in the same message**.
 8. **Every line defensible in one sentence**, or it does not go in.
 9. **Do not chase coverage.** JaCoCo is measured, not a target (`docs/06`).
 10. **Add files by explicit path.** These gitignored personal notes must never be staged:
-    `GUION_DEFENSA.md`, `docs/99-defense-notes.md`, `QUALIFYZE_CONTEXT.md`,
+    `GUION_DEFENSA.md`, `99-defense-notes.md`, `QUALIFYZE_CONTEXT.md`,
     `PLAN_2_DIAS_QUALIFYZE.md`.
 11. **The design vocabulary is binding.** Request states are exactly `PENDING`, `SCHEDULED`,
     `FULFILLED`, `UNSCHEDULABLE`, `CANCELLED`. Audit states are exactly `SCHEDULED`, `IN_PROGRESS`,
