@@ -51,13 +51,6 @@ Tests: JUnit 5 + AssertJ · Mockito (use-case seam only, never on domain objects
 
 `<type> : <lowercase summary>` — type ∈ {feat, fix, test, refactor, docs, chore}.
 
-Footer:
-
-```
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
-Claude-Session: <session url>
-```
-
 ## Read before implementing
 
 `docs/01` domain model · `docs/02` data model · `docs/05` concurrency · `docs/06` testing strategy.
