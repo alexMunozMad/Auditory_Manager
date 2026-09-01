@@ -42,16 +42,37 @@ Do not break these without the user's explicit approval **in the same message**.
 
 ## Stack (locked)
 
-Java 25 · Spring Boot 4 · Gradle · Liquibase 5 · PostgreSQL 18.
+Java 25 · Spring Boot 4 · Maven · Liquibase · PostgreSQL 18.
+
+**Liquibase: don't pin a version.** Let Spring Boot's dependency-management BOM resolve it.
+(Verified: Spring Boot 4.1.1's BOM manages `liquibase-core:5.0.3` — "5" is real, not a typo carried
+over from the sibling challenge — but the point stands regardless of the number: pinning it
+ourselves is how half an hour gets lost arguing with the build tool instead of building.)
+
+**Build: Maven** (`spring-boot-starter-parent`), not Gradle. Conventional in Spring shops, a
+`pom.xml` reads at a glance, and there's no build DSL to explain during the defence (rule 8).
+
+**Persistence: `JdbcClient`, no JPA/Hibernate.** Domain objects mapped to and from rows by hand.
+Not a style preference — the worker's placement loop uses a unique-constraint violation as control
+flow, in the same transaction, potentially several times per request (`05 §4`,
+`diagrams/worker-decision.mermaid`). A JPA flush failure leaves the `EntityManager` rollback-only;
+`JdbcClient` surfaces it as a catchable `DuplicateKeyException` and the transaction stays usable.
+Full reasoning: [ADR 0004](docs/adr/0004-no-jpa-jdbc-client.md).
 
 Tests: JUnit 5 + AssertJ · Mockito (use-case seam only, never on domain objects) · Testcontainers
 (PostgreSQL 18) · Awaitility. No in-memory database — `docs/06` explains why.
 
-**The lock has one valve: the scaffolding timebox.** Scaffolding is capped (~90 min, per the
-2-day plan). If Liquibase 5 or Spring Boot 4 is what's blocking past that point, retreat is
-allowed — plain SQL migration scripts instead of Liquibase, or a Spring Boot version already
-known — but **stop and say so before switching**; it's a reported retreat, not a silent one.
-Outside scaffolding, the lock has no valve — rule 4 applies as written.
+**The lock has one valve: the scaffolding timebox — 90 minutes, hard, starting when
+`chore/2-scaffolding` branches.** The retreat order is decided now, not at minute 91, so there is
+no decision left to make under time pressure:
+
+1. First to fall: **Liquibase** → plain SQL migration scripts. Cheapest to explain, least central
+   to anything defended.
+2. Only if that alone doesn't clear the block: reconsider the **Spring Boot version** — a version
+   already known.
+
+Either way: **stop and say so before switching** — a reported retreat, not a silent one. Outside
+scaffolding, the lock has no valve — rule 4 applies as written.
 
 ## Implementation scope — the slice
 
@@ -78,11 +99,18 @@ real notification consumer, the real broker/relay, webhooks.
 | # | Branch | Delivers |
 |---|---|---|
 | 1 | `chore/1-dev-guardrails` | done |
-| 2 | `chore/2-scaffolding` | Spring Boot + Liquibase changelog + Testcontainers wiring |
+| 2 | `chore/2-scaffolding` | Spring Boot + Liquibase changelog + Testcontainers wiring — 90 min timebox (see Stack) |
 | 3 | `feat/3-domain` | `SubscriptionLevel`, `DeliveryWindow`, `AuditRequest`, `Audit` |
 | 4 | `feat/4-create-request` | `POST /v1/audit-requests` + idempotency |
 | 5 | `feat/5-assignment-worker` | claim, reuse check, placement, outbox write |
 | 6 | `test/6-concurrency` | the N-threads test + drop-the-index proof |
+
+**Ticket 2's exit test proves behaviour, not presence.** Don't query the catalog for whether a
+constraint exists — insert two audits with the same auditor and date and assert the database
+rejects the second. Querying the catalog proves the line was written; inserting proves the line
+does something. The red→green cycle here isn't really TDD (there's no unit of behaviour to drive
+out) — its value is proving Testcontainers, Liquibase and Spring Boot actually wire together, which
+is the real risk in this ticket.
 
 ## Workflow per task
 
