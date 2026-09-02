@@ -7,8 +7,10 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AuditRequestTest {
 
@@ -151,5 +153,44 @@ class AuditRequestTest {
 	@Test
 	void cancelRequiresAReason() {
 		assertThrows(IllegalArgumentException.class, () -> pending().cancel("  "));
+	}
+
+	// ESSENTIALS, requested 2026-01-01: window 2026-01-22 .. 2026-04-24 (min 28, max 120, processing 7).
+
+	@Test
+	void reportCommitmentProjectsTheWindowAcrossTheProcessingDuration() {
+		ReportCommitment commitment = pending().reportCommitment(PROCESSING_DAYS);
+
+		assertEquals(LocalDate.parse("2026-01-29"), commitment.reportNoEarlierThan()); // earliest + 7
+		assertEquals(LocalDate.parse("2026-05-01"), commitment.reportNoLaterThan());   // latest + 7
+	}
+
+	@Test
+	void accessDateIsNeverBeforeTheClientsMinimumWindow() {
+		AuditRequest request = pending();
+
+		// publication after the 28-day floor → the publication date wins
+		assertEquals(LocalDate.parse("2026-03-01"), request.accessDateFor(LocalDate.parse("2026-03-01")));
+		// publication before the floor → floored at requested_at + 28
+		assertEquals(LocalDate.parse("2026-01-29"), request.accessDateFor(LocalDate.parse("2026-01-10")));
+	}
+
+	@Test
+	void canReuseWhenBothA7ConditionsHold() {
+		assertTrue(pending().canReuse(
+				LocalDate.parse("2026-01-15"), LocalDate.parse("2027-01-15"), PROCESSING_DAYS));
+	}
+
+	@Test
+	void cannotReuseAnAuditThatExpiresBeforeTheAccessDate() {
+		assertFalse(pending().canReuse(
+				LocalDate.parse("2025-01-01"), LocalDate.parse("2026-01-20"), PROCESSING_DAYS));
+	}
+
+	@Test
+	void cannotReuseWhenTheAccessDateWouldBreachTheContractualCeiling() {
+		// publication 2026-06-01 → access 2026-06-01, past reportNoLaterThan 2026-05-01
+		assertFalse(pending().canReuse(
+				LocalDate.parse("2026-06-01"), LocalDate.parse("2030-01-01"), PROCESSING_DAYS));
 	}
 }
