@@ -1,5 +1,6 @@
 package com.qualifyze.audit.web;
 
+import com.jayway.jsonpath.JsonPath;
 import com.qualifyze.audit.TestcontainersConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,15 +46,19 @@ class AuditRequestControllerTest {
 	void freezeTimeAndSeed() {
 		given(clock.instant()).willReturn(NOW);
 
-		UUID supplierId = UUID.randomUUID();
 		clientId = UUID.randomUUID();
-		siteId = UUID.randomUUID();
+		siteId = insertSite();
+		insertClient(clientId, "ESSENTIALS", "2027-01-01");
+	}
 
+	private UUID insertSite() {
+		UUID supplierId = UUID.randomUUID();
+		UUID id = UUID.randomUUID();
 		jdbc.sql("INSERT INTO supplier (id, name) VALUES (?, ?)")
 				.params(supplierId, "supplier-" + supplierId).update();
 		jdbc.sql("INSERT INTO site (id, supplier_id, name) VALUES (?, ?, ?)")
-				.params(siteId, supplierId, "site-" + siteId).update();
-		insertClient(clientId, "ESSENTIALS", "2027-01-01");
+				.params(id, supplierId, "site-" + id).update();
+		return id;
 	}
 
 	private void insertClient(UUID id, String level, String validUntil) {
@@ -98,6 +103,50 @@ class AuditRequestControllerTest {
 				 WHERE r.client_id = ? AND r.site_id = ? AND r.status = 'PENDING'
 				""").params(clientId, siteId).query(Long.class).single();
 		org.junit.jupiter.api.Assertions.assertEquals(1L, rows);
+	}
+
+	@Test
+	void retryWithTheSameKeyAndBodyReplaysTheOriginal201() throws Exception {
+		String body = "{\"siteId\":\"" + siteId + "\"}";
+
+		String firstBody = mockMvc.perform(post("/v1/audit-requests")
+						.header("X-Client-Id", clientId)
+						.header("Idempotency-Key", "key-replay")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(body))
+				.andExpect(status().isCreated())
+				.andReturn().getResponse().getContentAsString();
+		String firstId = JsonPath.read(firstBody, "$.id");
+
+		mockMvc.perform(post("/v1/audit-requests")
+						.header("X-Client-Id", clientId)
+						.header("Idempotency-Key", "key-replay")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(body))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.id").value(firstId));
+
+		Long rows = jdbc.sql("SELECT count(*) FROM audit_request WHERE client_id = ? AND idempotency_key = ?")
+				.params(clientId, "key-replay").query(Long.class).single();
+		org.junit.jupiter.api.Assertions.assertEquals(1L, rows);
+	}
+
+	@Test
+	void reusingTheKeyWithADifferentBodyReturns422() throws Exception {
+		mockMvc.perform(post("/v1/audit-requests")
+						.header("X-Client-Id", clientId)
+						.header("Idempotency-Key", "key-reuse")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"siteId\":\"" + siteId + "\"}"))
+				.andExpect(status().isCreated());
+
+		mockMvc.perform(post("/v1/audit-requests")
+						.header("X-Client-Id", clientId)
+						.header("Idempotency-Key", "key-reuse")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"siteId\":\"" + insertSite() + "\"}"))
+				.andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.type").value("https://api.qualifyze.com/problems/idempotency-key-reused"));
 	}
 
 	@Test

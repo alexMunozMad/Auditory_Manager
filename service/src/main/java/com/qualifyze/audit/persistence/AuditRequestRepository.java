@@ -1,13 +1,19 @@
 package com.qualifyze.audit.persistence;
 
 import com.qualifyze.audit.domain.AuditRequest;
+import com.qualifyze.audit.domain.DeliveryWindow;
+import com.qualifyze.audit.domain.RequestStatus;
+import com.qualifyze.audit.domain.SubscriptionLevel;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -57,6 +63,37 @@ public class AuditRequestRepository {
 						"client:" + request.clientId(),
 						createdPayload(request))
 				.update();
+	}
+
+	/**
+	 * The request stored under {@code (client_id, idempotency_key)}, if any. Used by the create path
+	 * to answer a retry: the unique index {@code audit_request_idempotency} makes this at most one row
+	 * (docs/02 §5, docs/03 §3).
+	 */
+	public Optional<AuditRequest> findByClientAndIdempotencyKey(UUID clientId, String idempotencyKey) {
+		return jdbc.sql("""
+				SELECT id, client_id, site_id, audit_id, requested_at, subscription_level_code,
+				       earliest_audit_date, latest_audit_date, available_to_client_at,
+				       status, cancellation_reason, idempotency_key
+				  FROM audit_request
+				 WHERE client_id = ? AND idempotency_key = ?
+				""")
+				.params(clientId, idempotencyKey)
+				.query((rs, rowNum) -> AuditRequest.rehydrate(
+						rs.getObject("id", UUID.class),
+						rs.getObject("client_id", UUID.class),
+						rs.getObject("site_id", UUID.class),
+						SubscriptionLevel.valueOf(rs.getString("subscription_level_code")),
+						rs.getObject("requested_at", OffsetDateTime.class).toInstant(),
+						new DeliveryWindow(
+								rs.getObject("earliest_audit_date", LocalDate.class),
+								rs.getObject("latest_audit_date", LocalDate.class)),
+						rs.getString("idempotency_key"),
+						RequestStatus.valueOf(rs.getString("status")),
+						rs.getObject("audit_id", UUID.class),
+						rs.getObject("available_to_client_at", LocalDate.class),
+						rs.getString("cancellation_reason")))
+				.optional();
 	}
 
 	private String createdPayload(AuditRequest request) {

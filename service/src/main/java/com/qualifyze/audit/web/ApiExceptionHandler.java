@@ -1,5 +1,6 @@
 package com.qualifyze.audit.web;
 
+import com.qualifyze.audit.application.IdempotencyKeyReusedException;
 import com.qualifyze.audit.application.SiteNotFoundException;
 import com.qualifyze.audit.application.SubscriptionNotActiveException;
 import com.qualifyze.audit.application.UnknownClientException;
@@ -47,6 +48,12 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 	ProblemDetail onSubscriptionNotActive(SubscriptionNotActiveException ex) {
 		return problem(HttpStatus.UNPROCESSABLE_ENTITY, "subscription-not-active",
 				"Subscription is not active", ex.getMessage());
+	}
+
+	@ExceptionHandler(IdempotencyKeyReusedException.class)
+	ProblemDetail onIdempotencyKeyReused(IdempotencyKeyReusedException ex) {
+		return problem(HttpStatus.UNPROCESSABLE_ENTITY, "idempotency-key-reused",
+				"Idempotency key reused with a different body", ex.getMessage());
 	}
 
 	/** A malformed value the domain rejected at the boundary (e.g. a blank idempotency key). */

@@ -60,6 +60,24 @@ public class AuditRequest {
 		return new AuditRequest(id, clientId, siteId, level, requestedAt, window, idempotencyKey);
 	}
 
+	/**
+	 * Rebuild an aggregate from its persisted row. Persistence-facing — the caller is a repository
+	 * and every field is taken as stored, with no invariant re-run: the row already satisfied them
+	 * on the way in (the CHECKs in docs/02 §3). A rehydrated request equals the one that was saved.
+	 */
+	public static AuditRequest rehydrate(UUID id, UUID clientId, UUID siteId, SubscriptionLevel level,
+			Instant requestedAt, DeliveryWindow deliveryWindow, String idempotencyKey,
+			RequestStatus status, UUID auditId, LocalDate availableToClientAt, String cancellationReason) {
+
+		AuditRequest request = new AuditRequest(id, clientId, siteId, level, requestedAt,
+				deliveryWindow, idempotencyKey);
+		request.status = status;
+		request.auditId = auditId;
+		request.availableToClientAt = availableToClientAt;
+		request.cancellationReason = cancellationReason;
+		return request;
+	}
+
 	/** PENDING → SCHEDULED: bound to an audit (newly scheduled or reused), with this client's access date. */
 	public void attachTo(UUID auditId, LocalDate availableToClientAt) {
 		requireStatus(RequestStatus.PENDING, "attach");

@@ -43,6 +43,23 @@ class AuditRequestTest {
 	}
 
 	@Test
+	void rehydrateRestoresEveryPersistedField() {
+		DeliveryWindow window = DeliveryWindow.forRequest(SubscriptionLevel.ADVANCED, REQUESTED_AT, PROCESSING_DAYS);
+		UUID auditId = UUID.randomUUID();
+		LocalDate accessDate = LocalDate.parse("2026-03-01");
+
+		AuditRequest request = AuditRequest.rehydrate(ID, CLIENT, SITE, SubscriptionLevel.ADVANCED,
+				REQUESTED_AT, window, KEY, RequestStatus.SCHEDULED, auditId, accessDate, null);
+
+		assertEquals(ID, request.id());
+		assertEquals(SubscriptionLevel.ADVANCED, request.subscriptionLevel());
+		assertEquals(window, request.deliveryWindow());
+		assertEquals(RequestStatus.SCHEDULED, request.status());
+		assertEquals(auditId, request.auditId());
+		assertEquals(accessDate, request.availableToClientAt());
+	}
+
+	@Test
 	void acceptRejectsABlankIdempotencyKey() {
 		assertThrows(IllegalArgumentException.class, () ->
 				AuditRequest.accept(ID, CLIENT, SITE, SubscriptionLevel.PREMIUM, REQUESTED_AT, PROCESSING_DAYS, "  "));
