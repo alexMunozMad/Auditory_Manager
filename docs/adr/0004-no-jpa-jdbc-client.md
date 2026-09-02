@@ -8,19 +8,28 @@ The worker's placement loop (ADR 0001, `05 §4`, `diagrams/worker-decision.merma
 constraint violation as **control flow**, not as an exceptional failure:
 
 ```
+SAVEPOINT s
 INSERT audit (auditor, date)
-  → UNIQUE (auditor_id, audit_date) violated → next candidate → retry
-  → otherwise                                → attached, done
+  → UNIQUE (auditor_id, audit_date) violated → ROLLBACK TO SAVEPOINT s → next candidate → retry
+  → otherwise                                → RELEASE SAVEPOINT s → attached, done
 ```
 
 This happens **inside the same transaction**, potentially several times per claimed request. The
 persistence technology has to support that shape without fighting it.
 
+**Postgres aborts a transaction on any `23505`** — the next statement fails with `25P02` until the
+transaction ends. So "retry in the same transaction" is only possible with a **savepoint per
+attempt** (`SAVEPOINT` / `ROLLBACK TO SAVEPOINT`, i.e. Spring's `Propagation.NESTED`). A savepoint
+is a sub-unit of one transaction, not a new one: the loop still commits once. The question this ADR
+answers is whether the savepoint is *enough* — with JDBC it is, with Hibernate it is not.
+
 ## What JPA/Hibernate would cost here
 
-A `23505 unique_violation` surfacing through Hibernate is a **flush failure**. Past that point the
-`EntityManager` is in an invalid state: the transaction is marked rollback-only, and no further
-work can happen on it. "Try the next candidate" would then require either:
+A `23505 unique_violation` surfacing through Hibernate is a **flush failure**. Rolling back to a
+savepoint clears the Postgres-level abort, but not Hibernate's: past the failed flush the
+`EntityManager` still holds the rejected entity as pending state and the persistence context is
+inconsistent with the database. The transaction is marked rollback-only and no further work can
+happen on it. "Try the next candidate" would then require either:
 
 - a **new transaction per attempt** — turning one logical placement into N transactions, each
   paying commit overhead, for a loop that is expected to run once in the common case; or
@@ -39,9 +48,14 @@ retries.
 and from rows by hand.**
 
 With `JdbcClient`, a unique-index violation surfaces as a plain `DuplicateKeyException` from a
-single `INSERT`. The transaction is untouched — nothing was flushed, nothing is pending. The worker
-catches it and tries the next candidate **in the same transaction**, exactly as
-`worker-decision.mermaid` draws it.
+single `INSERT`, and nothing on the JDBC side is left pending — no flush to fail, no persistence
+context to reconcile. Wrapping each attempt in a savepoint (`Propagation.NESTED`) is then
+sufficient: the failed candidate rolls back to the savepoint, the transaction is usable again, and
+the worker tries the next candidate **in the same transaction**, exactly as
+`worker-decision.mermaid` draws it. The retry loop commits once.
+
+Boot's `JdbcTransactionManager` allows nested transactions (JDBC savepoints) out of the box; no
+configuration is needed.
 
 ## Two supporting arguments
 
@@ -66,5 +80,5 @@ choice already made, not a new one.
 Framing this as "a rich domain model doesn't need JPA annotations" is true but not the reason: a
 mapper class would solve that just as well while still routing inserts through an
 `EntityManager`. The reason is narrower and specific to this design — the worker's retry loop
-depends on a failed insert leaving the transaction usable, which is a property JDBC has and JPA
-does not.
+depends on a failed insert leaving the transaction **recoverable by a savepoint**, which holds with
+JDBC and does not with Hibernate's persistence context.
