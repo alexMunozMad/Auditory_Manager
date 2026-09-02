@@ -37,6 +37,7 @@ QUALIFYZE_CONTEXT.md
 PLAN_2_DIAS_QUALIFYZE.md
 GUION_DEFENSA.md
 99-defense-notes.md
+BITACORA_TICKETS.md
 
 # mattpocock skills vendoring — reproducible via skills-lock.json + `npx skills install`,
 # not committed (skills-lock.json is gitignored too)
