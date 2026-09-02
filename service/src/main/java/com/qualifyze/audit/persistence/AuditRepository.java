@@ -5,13 +5,17 @@ import com.qualifyze.audit.domain.AuditStatus;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -49,12 +53,16 @@ public class AuditRepository {
 	}
 
 	/**
-	 * Write a newly scheduled audit and its {@code AuditScheduled} outbox row in one transaction
-	 * (A8, ADR 0002, docs/04 §3). The two unique indexes ({@code audit_one_per_auditor_per_day},
+	 * Write a newly scheduled audit and its {@code AuditScheduled} outbox row (A8, ADR 0002,
+	 * docs/04 §3). The two unique indexes ({@code audit_one_per_auditor_per_day},
 	 * {@code audit_one_in_flight_per_site}) are the guarantee — a lost race surfaces here as a
-	 * {@code DuplicateKeyException} for the worker to handle.
+	 * {@code DuplicateKeyException}.
+	 *
+	 * <p>{@code NESTED}: each call runs in its own savepoint inside the worker's transaction, so a
+	 * rejected candidate rolls back to the savepoint and the worker retries the next one without
+	 * losing the transaction (ADR 0004 — Postgres aborts a transaction on any {@code 23505}).
 	 */
-	@Transactional
+	@Transactional(propagation = Propagation.NESTED)
 	public void save(Audit audit) {
 		jdbc.sql("""
 				INSERT INTO audit
@@ -132,6 +140,27 @@ public class AuditRepository {
 				.param(loadWindowStart)
 				.query(UUID.class)
 				.list();
+	}
+
+	/**
+	 * Every {@code (audit_date, auditor_id)} already taken in {@code [from, to]} — one read that feeds
+	 * the placement search, so it does not query per candidate. Discarded audits release their slot.
+	 */
+	public Map<LocalDate, Set<UUID>> auditorsBookedBetween(LocalDate from, LocalDate to) {
+		return jdbc.sql("""
+				SELECT audit_date, auditor_id
+				  FROM audit
+				 WHERE audit_date BETWEEN ? AND ? AND status <> 'DISCARDED'
+				""")
+				.params(from, to)
+				.query(rs -> {
+					Map<LocalDate, Set<UUID>> booked = new HashMap<>();
+					while (rs.next()) {
+						booked.computeIfAbsent(rs.getObject("audit_date", LocalDate.class), day -> new HashSet<>())
+								.add(rs.getObject("auditor_id", UUID.class));
+					}
+					return booked;
+				});
 	}
 
 	private String scheduledPayload(Audit audit) {

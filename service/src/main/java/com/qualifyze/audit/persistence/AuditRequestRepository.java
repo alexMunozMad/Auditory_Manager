@@ -1,7 +1,9 @@
 package com.qualifyze.audit.persistence;
 
+import com.qualifyze.audit.domain.Audit;
 import com.qualifyze.audit.domain.AuditRequest;
 import com.qualifyze.audit.domain.DeliveryWindow;
+import com.qualifyze.audit.domain.ReportCommitment;
 import com.qualifyze.audit.domain.RequestStatus;
 import com.qualifyze.audit.domain.SubscriptionLevel;
 import org.springframework.jdbc.core.RowMapper;
@@ -142,6 +144,44 @@ public class AuditRequestRepository {
 			throw new IllegalStateException(
 					"expected to update exactly one audit_request, updated " + rows);
 		}
+	}
+
+	/**
+	 * {@code AuditRequestScheduled} outbox row for a request the worker just attached to an audit
+	 * (docs/04 §3). Written by the worker in the same transaction as {@link #update}.
+	 */
+	public void recordScheduled(AuditRequest request) {
+		ReportCommitment commitment = request.reportCommitment(Audit.DEFAULT_PROCESSING_DURATION_DAYS);
+		insertTransitionEvent(request.id(), "AuditRequestScheduled", json.writeValueAsString(Map.of(
+				"requestId", request.id().toString(),
+				"clientId", request.clientId().toString(),
+				"auditId", request.auditId().toString(),
+				"expectedReportDate", request.availableToClientAt().toString(),
+				"commitment", Map.of(
+						"reportNoEarlierThan", commitment.reportNoEarlierThan().toString(),
+						"reportNoLaterThan", commitment.reportNoLaterThan().toString()))));
+	}
+
+	/**
+	 * {@code AuditRequestUnschedulable} outbox row for a request whose deadline passed with no
+	 * placement (docs/04 §3). {@code reason} is the single value docs/03 §4 defines for this scope.
+	 */
+	public void recordUnschedulable(AuditRequest request) {
+		insertTransitionEvent(request.id(), "AuditRequestUnschedulable", json.writeValueAsString(Map.of(
+				"requestId", request.id().toString(),
+				"clientId", request.clientId().toString(),
+				"reason", "deadline-passed-without-placement",
+				"latestAuditDate", request.deliveryWindow().latestAuditDate().toString())));
+	}
+
+	private void insertTransitionEvent(UUID requestId, String eventType, String payload) {
+		jdbc.sql("""
+				INSERT INTO outbox_event
+				  (id, aggregate_type, aggregate_id, event_type, actor, payload, occurred_at)
+				VALUES (?, 'audit_request', ?, ?, 'worker:assignment', ?::jsonb, now())
+				""")
+				.params(UUID.randomUUID(), requestId, eventType, payload)
+				.update();
 	}
 
 	private String createdPayload(AuditRequest request) {
