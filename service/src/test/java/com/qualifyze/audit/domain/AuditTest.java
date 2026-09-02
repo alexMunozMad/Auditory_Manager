@@ -120,4 +120,17 @@ class AuditTest {
 		assertThrows(IllegalArgumentException.class,
 				() -> Audit.schedule(ID, SITE, AUDITOR, LocalDate.parse("2026-07-27"), -1));
 	}
+
+	@Test
+	void rehydrateRestoresEveryPersistedField() {
+		Audit audit = Audit.rehydrate(ID, SITE, AUDITOR, LocalDate.parse("2026-07-27"), 1, 7,
+				AuditStatus.PUBLISHED, LocalDate.parse("2026-08-03"), LocalDate.parse("2027-08-03"),
+				"s3://reports/018f7c3d.pdf");
+
+		assertEquals(AuditStatus.PUBLISHED, audit.status());
+		assertEquals(LocalDate.parse("2026-08-03"), audit.publishedAt());
+		assertEquals(LocalDate.parse("2027-08-03"), audit.validUntil());
+		assertEquals("s3://reports/018f7c3d.pdf", audit.reportUri());
+		assertEquals(AUDITOR, audit.auditorId());
+	}
 }
