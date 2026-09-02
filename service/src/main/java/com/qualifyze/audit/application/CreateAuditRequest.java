@@ -1,5 +1,6 @@
 package com.qualifyze.audit.application;
 
+import com.qualifyze.audit.domain.Audit;
 import com.qualifyze.audit.domain.AuditRequest;
 import com.qualifyze.audit.persistence.AuditRequestRepository;
 import com.qualifyze.audit.persistence.ClientRepository;
@@ -18,9 +19,6 @@ import java.util.UUID;
  */
 @Service
 public class CreateAuditRequest {
-
-	/** The default the request-time window arithmetic is frozen with (docs/00 A1, docs/02 §3). */
-	private static final int PROCESSING_DURATION_DAYS = 7;
 
 	private final SiteRepository sites;
 	private final ClientRepository clients;
@@ -49,7 +47,7 @@ public class CreateAuditRequest {
 		}
 
 		AuditRequest request = AuditRequest.accept(UUID.randomUUID(), command.clientId(),
-				command.siteId(), subscription.level(), now, PROCESSING_DURATION_DAYS,
+				command.siteId(), subscription.level(), now, Audit.DEFAULT_PROCESSING_DURATION_DAYS,
 				command.idempotencyKey());
 
 		requests.save(request);
