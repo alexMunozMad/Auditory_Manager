@@ -5,6 +5,7 @@ import com.qualifyze.audit.domain.AuditRequest;
 import com.qualifyze.audit.persistence.AuditRequestRepository;
 import com.qualifyze.audit.persistence.ClientRepository;
 import com.qualifyze.audit.persistence.SiteRepository;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -16,6 +17,11 @@ import java.util.UUID;
  * Accept an audit request: resolve the client's frozen level, check the site exists and the
  * subscription is active, then persist a {@code PENDING} row with its outbox event (docs/03 §3,
  * ADR 0001). Assignment happens later, off this path.
+ *
+ * <p>Idempotency is claimed by the {@code audit_request_idempotency} unique index, not a
+ * check-then-insert: {@link #execute} tries the write and reads the winner back only when the index
+ * rejects it (docs/03 §3). This method is deliberately <em>not</em> {@code @Transactional} — the
+ * failed insert's transaction must roll back cleanly before the follow-up read runs.
  */
 @Service
 public class CreateAuditRequest {
@@ -50,7 +56,27 @@ public class CreateAuditRequest {
 				command.siteId(), subscription.level(), now, Audit.DEFAULT_PROCESSING_DURATION_DAYS,
 				command.idempotencyKey());
 
-		requests.save(request);
-		return request;
+		try {
+			requests.save(request);
+			return request;
+		} catch (DuplicateKeyException alreadyClaimed) {
+			return replay(command);
+		}
+	}
+
+	/**
+	 * A row already exists for this {@code (client, key)}. A retry of the same intent replays it;
+	 * the same key with a different {@code siteId} is a client bug and fails loudly (docs/03 §3).
+	 */
+	private AuditRequest replay(CreateAuditRequestCommand command) {
+		AuditRequest existing = requests
+				.findByClientAndIdempotencyKey(command.clientId(), command.idempotencyKey())
+				.orElseThrow(() -> new IllegalStateException(
+						"idempotency key was claimed but no row is present"));
+
+		if (!existing.siteId().equals(command.siteId())) {
+			throw new IdempotencyKeyReusedException(command.clientId());
+		}
+		return existing;
 	}
 }

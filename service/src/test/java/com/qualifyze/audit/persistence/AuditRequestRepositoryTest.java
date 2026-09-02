@@ -92,4 +92,24 @@ class AuditRequestRepositoryTest {
 	private long count(String sql, Object arg) {
 		return jdbc.sql(sql).param(arg).query(Long.class).single();
 	}
+
+	@Test
+	void findByClientAndIdempotencyKeyRehydratesTheStoredRequest() {
+		AuditRequest saved = acceptedRequest("key-find");
+		repository.save(saved);
+
+		AuditRequest found = repository.findByClientAndIdempotencyKey(clientId, "key-find").orElseThrow();
+
+		assertEquals(saved.id(), found.id());
+		assertEquals(saved.siteId(), found.siteId());
+		assertEquals(saved.requestedAt(), found.requestedAt());
+		assertEquals(saved.deliveryWindow(), found.deliveryWindow());
+		assertEquals(RequestStatus.PENDING, found.status());
+	}
+
+	@Test
+	void findByClientAndIdempotencyKeyIsEmptyWhenNoRowMatches() {
+		assertEquals(java.util.Optional.empty(),
+				repository.findByClientAndIdempotencyKey(clientId, "absent"));
+	}
 }

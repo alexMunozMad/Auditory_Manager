@@ -43,15 +43,19 @@ class CreateAuditRequestTest {
 	void freezeTimeAndSeed() {
 		given(clock.instant()).willReturn(NOW);
 
-		UUID supplierId = UUID.randomUUID();
 		clientId = UUID.randomUUID();
-		siteId = UUID.randomUUID();
+		siteId = insertSite();
+		insertClient(clientId, "ESSENTIALS", "2027-01-01");
+	}
 
+	private UUID insertSite() {
+		UUID supplierId = UUID.randomUUID();
+		UUID id = UUID.randomUUID();
 		jdbc.sql("INSERT INTO supplier (id, name) VALUES (?, ?)")
 				.params(supplierId, "supplier-" + supplierId).update();
 		jdbc.sql("INSERT INTO site (id, supplier_id, name) VALUES (?, ?, ?)")
-				.params(siteId, supplierId, "site-" + siteId).update();
-		insertClient(clientId, "ESSENTIALS", "2027-01-01");
+				.params(id, supplierId, "site-" + id).update();
+		return id;
 	}
 
 	private void insertClient(UUID id, String level, String validUntil) {
@@ -106,6 +110,32 @@ class CreateAuditRequestTest {
 		var cmd = new CreateAuditRequestCommand(lapsed, siteId, "idem-key-4");
 
 		assertThrows(SubscriptionNotActiveException.class, () -> createAuditRequest.execute(cmd));
+	}
+
+	@Test
+	void replaysTheOriginalRequestWhenTheSameKeyAndBodyRepeat() {
+		AuditRequest first = createAuditRequest.execute(command());
+		AuditRequest replay = createAuditRequest.execute(command());
+
+		assertEquals(first.id(), replay.id());
+
+		Long rows = jdbc.sql("SELECT count(*) FROM audit_request WHERE client_id = ? AND idempotency_key = ?")
+				.params(clientId, "idem-key-1").query(Long.class).single();
+		assertEquals(1L, rows);
+
+		Long events = jdbc.sql("""
+				SELECT count(*) FROM outbox_event
+				 WHERE aggregate_id = ? AND event_type = 'AuditRequestCreated'
+				""").param(first.id()).query(Long.class).single();
+		assertEquals(1L, events);
+	}
+
+	@Test
+	void rejectsAReusedKeyCarryingADifferentSite() {
+		createAuditRequest.execute(command());
+		var reused = new CreateAuditRequestCommand(clientId, insertSite(), "idem-key-1");
+
+		assertThrows(IdempotencyKeyReusedException.class, () -> createAuditRequest.execute(reused));
 	}
 
 	@Test
