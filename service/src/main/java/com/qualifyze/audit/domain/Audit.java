@@ -69,6 +69,23 @@ public class Audit {
 		return new Audit(id, siteId, auditorId, auditDate, DEFAULT_AUDIT_DURATION_DAYS, processingDurationDays);
 	}
 
+	/**
+	 * Rebuild an audit from its persisted row. Persistence-facing — the caller is a repository and
+	 * every field is taken as stored, with no invariant re-run: the row already satisfied the CHECKs
+	 * of docs/02 §2 on the way in. A rehydrated audit equals the one that was saved.
+	 */
+	public static Audit rehydrate(UUID id, UUID siteId, UUID auditorId, LocalDate auditDate,
+			int auditDurationDays, int processingDurationDays, AuditStatus status,
+			LocalDate publishedAt, LocalDate validUntil, String reportUri) {
+
+		Audit audit = new Audit(id, siteId, auditorId, auditDate, auditDurationDays, processingDurationDays);
+		audit.status = status;
+		audit.publishedAt = publishedAt;
+		audit.validUntil = validUntil;
+		audit.reportUri = reportUri;
+		return audit;
+	}
+
 	/** The date this audit will publish on, projected from the audit date (docs/00 A1). */
 	public LocalDate projectedPublicationDate() {
 		return auditDate.plusDays(processingDurationDays);
