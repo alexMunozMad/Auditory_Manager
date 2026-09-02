@@ -23,6 +23,12 @@ public class Audit {
 	/** In this scope the on-site duration never varies from the default (docs/00 A1, docs/07 §6). */
 	public static final int DEFAULT_AUDIT_DURATION_DAYS = 1;
 
+	/**
+	 * Days from the audit date to publication (docs/00 A1). The request-time window and the client's
+	 * report commitment are both projected across this value; in this scope it never varies.
+	 */
+	public static final int DEFAULT_PROCESSING_DURATION_DAYS = 7;
+
 	private final UUID id;
 	private final UUID siteId;
 	private final UUID auditorId;
