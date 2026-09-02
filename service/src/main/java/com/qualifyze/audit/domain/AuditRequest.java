@@ -2,6 +2,7 @@ package com.qualifyze.audit.domain;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -118,6 +119,41 @@ public class AuditRequest {
 		if (status != required) {
 			throw new IllegalStateException("cannot " + action + " a request that is " + status);
 		}
+	}
+
+	/**
+	 * The frozen window projected into the client's vocabulary — report dates — across the processing
+	 * duration (docs/03 §3). {@code reportNoLaterThan} is the contractual ceiling.
+	 */
+	public ReportCommitment reportCommitment(int processingDurationDays) {
+		return new ReportCommitment(
+				deliveryWindow.earliestAuditDate().plusDays(processingDurationDays),
+				deliveryWindow.latestAuditDate().plusDays(processingDurationDays));
+	}
+
+	/**
+	 * When this client could read the report if the audit publishes on {@code publicationDate}:
+	 * never before the client's own minimum window (A7).
+	 * <pre>available_to_client_at = max(publicationDate, requested_at + min_window)</pre>
+	 */
+	public LocalDate accessDateFor(LocalDate publicationDate) {
+		LocalDate windowFloor = requestedAt.atZone(ZoneOffset.UTC).toLocalDate()
+				.plusDays(subscriptionLevel.minWindowDays());
+		return publicationDate.isAfter(windowFloor) ? publicationDate : windowFloor;
+	}
+
+	/**
+	 * Whether this request may attach to an audit that publishes on {@code publicationDate} and stays
+	 * valid until {@code validUntil} — both A7 conditions (docs/00 A7, docs/01 §3):
+	 * <pre>
+	 *   accessDate ≤ validUntil            the audit is still valid for this client
+	 *   accessDate ≤ reportNoLaterThan     the contractual ceiling is still met
+	 * </pre>
+	 */
+	public boolean canReuse(LocalDate publicationDate, LocalDate validUntil, int processingDurationDays) {
+		LocalDate accessDate = accessDateFor(publicationDate);
+		return !accessDate.isAfter(validUntil)
+				&& !accessDate.isAfter(reportCommitment(processingDurationDays).reportNoLaterThan());
 	}
 
 	public UUID id() {
