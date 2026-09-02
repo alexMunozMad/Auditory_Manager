@@ -4,6 +4,7 @@ import com.qualifyze.audit.domain.AuditRequest;
 import com.qualifyze.audit.domain.DeliveryWindow;
 import com.qualifyze.audit.domain.RequestStatus;
 import com.qualifyze.audit.domain.SubscriptionLevel;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,6 +23,28 @@ import java.util.UUID;
  */
 @Repository
 public class AuditRequestRepository {
+
+	private static final RowMapper<AuditRequest> REQUEST_ROW = (rs, rowNum) -> AuditRequest.rehydrate(
+			rs.getObject("id", UUID.class),
+			rs.getObject("client_id", UUID.class),
+			rs.getObject("site_id", UUID.class),
+			SubscriptionLevel.valueOf(rs.getString("subscription_level_code")),
+			rs.getObject("requested_at", OffsetDateTime.class).toInstant(),
+			new DeliveryWindow(
+					rs.getObject("earliest_audit_date", LocalDate.class),
+					rs.getObject("latest_audit_date", LocalDate.class)),
+			rs.getString("idempotency_key"),
+			RequestStatus.valueOf(rs.getString("status")),
+			rs.getObject("audit_id", UUID.class),
+			rs.getObject("available_to_client_at", LocalDate.class),
+			rs.getString("cancellation_reason"));
+
+	private static final String SELECT_COLUMNS = """
+			SELECT id, client_id, site_id, audit_id, requested_at, subscription_level_code,
+			       earliest_audit_date, latest_audit_date, available_to_client_at,
+			       status, cancellation_reason, idempotency_key
+			  FROM audit_request
+			""";
 
 	private final JdbcClient jdbc;
 	private final ObjectMapper json;
@@ -71,29 +95,53 @@ public class AuditRequestRepository {
 	 * (docs/02 §5, docs/03 §3).
 	 */
 	public Optional<AuditRequest> findByClientAndIdempotencyKey(UUID clientId, String idempotencyKey) {
-		return jdbc.sql("""
-				SELECT id, client_id, site_id, audit_id, requested_at, subscription_level_code,
-				       earliest_audit_date, latest_audit_date, available_to_client_at,
-				       status, cancellation_reason, idempotency_key
-				  FROM audit_request
-				 WHERE client_id = ? AND idempotency_key = ?
-				""")
+		return jdbc.sql(SELECT_COLUMNS + " WHERE client_id = ? AND idempotency_key = ?")
 				.params(clientId, idempotencyKey)
-				.query((rs, rowNum) -> AuditRequest.rehydrate(
-						rs.getObject("id", UUID.class),
-						rs.getObject("client_id", UUID.class),
-						rs.getObject("site_id", UUID.class),
-						SubscriptionLevel.valueOf(rs.getString("subscription_level_code")),
-						rs.getObject("requested_at", OffsetDateTime.class).toInstant(),
-						new DeliveryWindow(
-								rs.getObject("earliest_audit_date", LocalDate.class),
-								rs.getObject("latest_audit_date", LocalDate.class)),
-						rs.getString("idempotency_key"),
-						RequestStatus.valueOf(rs.getString("status")),
-						rs.getObject("audit_id", UUID.class),
-						rs.getObject("available_to_client_at", LocalDate.class),
-						rs.getString("cancellation_reason")))
+				.query(REQUEST_ROW)
 				.optional();
+	}
+
+	/**
+	 * Claim up to {@code limit} pending requests, earliest deadline first, skipping rows another
+	 * worker already holds (index 4, ADR 0001). {@code FOR UPDATE SKIP LOCKED} keeps the locks until
+	 * the surrounding transaction ends, so this <strong>must be called inside the worker's
+	 * transaction</strong> — it is not annotated here on purpose.
+	 */
+	public List<AuditRequest> claimPending(int limit) {
+		return jdbc.sql(SELECT_COLUMNS + """
+				 WHERE status = 'PENDING'
+				 ORDER BY latest_audit_date
+				 FOR UPDATE SKIP LOCKED
+				 LIMIT ?
+				""")
+				.param(limit)
+				.query(REQUEST_ROW)
+				.list();
+	}
+
+	/**
+	 * Persist a claimed request's mutable columns after the worker has moved it out of {@code PENDING}
+	 * ({@code status}, {@code audit_id}, {@code available_to_client_at}, {@code cancellation_reason}).
+	 * The transition's outbox row is written by the worker in the same transaction — the event type
+	 * depends on the transition, which the worker decides, not this row.
+	 */
+	public void update(AuditRequest request) {
+		int rows = jdbc.sql("""
+				UPDATE audit_request
+				   SET status = ?, audit_id = ?, available_to_client_at = ?, cancellation_reason = ?
+				 WHERE id = ?
+				""")
+				.params(request.status().name(),
+						request.auditId(),
+						request.availableToClientAt(),
+						request.cancellationReason(),
+						request.id())
+				.update();
+
+		if (rows != 1) {
+			throw new IllegalStateException(
+					"expected to update exactly one audit_request, updated " + rows);
+		}
 	}
 
 	private String createdPayload(AuditRequest request) {
