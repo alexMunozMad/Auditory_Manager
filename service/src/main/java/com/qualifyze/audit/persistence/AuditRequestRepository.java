@@ -21,7 +21,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Persists {@link AuditRequest} rows by hand ({@code JdbcClient}, no JPA — ADR 0004).
+ * Persists {@link AuditRequest} rows by hand ({@code JdbcClient}, no JPA - ADR 0004).
  */
 @Repository
 public class AuditRequestRepository {
@@ -107,7 +107,7 @@ public class AuditRequestRepository {
 	 * Claim up to {@code limit} pending requests, earliest deadline first, skipping rows another
 	 * worker already holds (index 4, ADR 0001). {@code FOR UPDATE SKIP LOCKED} keeps the locks until
 	 * the surrounding transaction ends, so this <strong>must be called inside the worker's
-	 * transaction</strong> — it is not annotated here on purpose.
+	 * transaction</strong> - it is not annotated here on purpose.
 	 */
 	public List<AuditRequest> claimPending(int limit) {
 		return jdbc.sql(SELECT_COLUMNS + """
@@ -124,7 +124,7 @@ public class AuditRequestRepository {
 	/**
 	 * Persist a claimed request's mutable columns after the worker has moved it out of {@code PENDING}
 	 * ({@code status}, {@code audit_id}, {@code available_to_client_at}, {@code cancellation_reason}).
-	 * The transition's outbox row is written by the worker in the same transaction — the event type
+	 * The transition's outbox row is written by the worker in the same transaction - the event type
 	 * depends on the transition, which the worker decides, not this row.
 	 */
 	public void update(AuditRequest request) {

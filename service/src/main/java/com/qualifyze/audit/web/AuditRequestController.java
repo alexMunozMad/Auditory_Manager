@@ -20,7 +20,7 @@ import java.util.UUID;
  * transaction boundary live in {@link CreateAuditRequest}; error translation lives in
  * {@link ApiExceptionHandler}.
  *
- * <p>{@code X-Client-Id} stands in for the JWT subject — the auth stub, one seam (docs/07 §7).
+ * <p>{@code X-Client-Id} stands in for the JWT subject - the auth stub, one seam (docs/07 §7).
  */
 @RestController
 @RequestMapping("/v1/audit-requests")

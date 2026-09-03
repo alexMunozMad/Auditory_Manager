@@ -12,7 +12,7 @@ public class TestcontainersConfiguration {
 	@Bean
 	@ServiceConnection
 	PostgreSQLContainer<?> postgresContainer() {
-		// PostgreSQL 18 — the deployment target (CLAUDE.md, docs/06). The schema uses
+		// PostgreSQL 18 - the deployment target (CLAUDE.md, docs/06). The schema uses
 		// features (partial unique indexes, plpgsql triggers) an in-memory DB can't fake.
 		return new PostgreSQLContainer<>(DockerImageName.parse("postgres:18"));
 	}

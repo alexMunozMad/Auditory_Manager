@@ -5,7 +5,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * The visit and the resulting report — a fact about a site, valid for one year, shared by every
+ * The visit and the resulting report - a fact about a site, valid for one year, shared by every
  * request attached to it (docs/01, A7).
  *
  * <p>The calendar arithmetic lives here, in one place (docs/01 §3):
@@ -16,7 +16,7 @@ import java.util.UUID;
  *
  * <p>The state machine (docs/01 §5) advances independently of the request's own; every transition
  * starts from a named state. {@code DISCARDED} is reachable only from {@code SCHEDULED} and is
- * unconditional — an audit with no remaining demand is dropped, not held in stock.
+ * unconditional - an audit with no remaining demand is dropped, not held in stock.
  */
 public class Audit {
 
@@ -70,7 +70,7 @@ public class Audit {
 	}
 
 	/**
-	 * Rebuild an audit from its persisted row. Persistence-facing — the caller is a repository and
+	 * Rebuild an audit from its persisted row. Persistence-facing - the caller is a repository and
 	 * every field is taken as stored, with no invariant re-run: the row already satisfied the CHECKs
 	 * of docs/02 §2 on the way in. A rehydrated audit equals the one that was saved.
 	 */
@@ -118,7 +118,7 @@ public class Audit {
 	}
 
 	/**
-	 * SCHEDULED → DISCARDED: the last attached request was withdrawn. Unconditional — an audit is
+	 * SCHEDULED → DISCARDED: the last attached request was withdrawn. Unconditional - an audit is
 	 * never worth performing without demand merely to hold it (docs/01 §5).
 	 */
 	public void discard() {

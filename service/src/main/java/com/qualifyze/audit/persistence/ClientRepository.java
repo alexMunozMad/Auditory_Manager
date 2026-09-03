@@ -9,7 +9,7 @@ import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Read-only access to the {@code client} row (docs/02 §1) — the system does not modify it. */
+/** Read-only access to the {@code client} row (docs/02 §1) - the system does not modify it. */
 @Repository
 public class ClientRepository {
 

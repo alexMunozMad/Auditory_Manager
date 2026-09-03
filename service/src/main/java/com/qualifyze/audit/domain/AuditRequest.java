@@ -10,7 +10,7 @@ import java.util.UUID;
  * A client's commitment: "audit this site under my subscription terms" (docs/01).
  *
  * <p>The subscription level and the delivery window are resolved once, at acceptance, and never
- * recomputed (A6, A9) — they are the contract. The status machine (docs/01 §5) advances
+ * recomputed (A6, A9) - they are the contract. The status machine (docs/01 §5) advances
  * independently of the audit's own, and every transition starts from a named state, never a
  * wildcard (A5): the methods below reject a move that does not begin where it should.
  */
@@ -62,7 +62,7 @@ public class AuditRequest {
 	}
 
 	/**
-	 * Rebuild an aggregate from its persisted row. Persistence-facing — the caller is a repository
+	 * Rebuild an aggregate from its persisted row. Persistence-facing - the caller is a repository
 	 * and every field is taken as stored, with no invariant re-run: the row already satisfied them
 	 * on the way in (the CHECKs in docs/02 §3). A rehydrated request equals the one that was saved.
 	 */
@@ -101,7 +101,7 @@ public class AuditRequest {
 
 	/**
 	 * PENDING or SCHEDULED → CANCELLED, with a reason: a regulated domain records why a commitment
-	 * was withdrawn (docs/02 §3). FULFILLED cannot be cancelled — once the report is available there
+	 * was withdrawn (docs/02 §3). FULFILLED cannot be cancelled - once the report is available there
 	 * is nothing left to withdraw.
 	 */
 	public void cancel(String reason) {
@@ -122,7 +122,7 @@ public class AuditRequest {
 	}
 
 	/**
-	 * The frozen window projected into the client's vocabulary — report dates — across the processing
+	 * The frozen window projected into the client's vocabulary - report dates - across the processing
 	 * duration (docs/03 §3). {@code reportNoLaterThan} is the contractual ceiling.
 	 */
 	public ReportCommitment reportCommitment(int processingDurationDays) {
@@ -144,7 +144,7 @@ public class AuditRequest {
 
 	/**
 	 * Whether this request may attach to an audit that publishes on {@code publicationDate} and stays
-	 * valid until {@code validUntil} — both A7 conditions (docs/00 A7, docs/01 §3):
+	 * valid until {@code validUntil} - both A7 conditions (docs/00 A7, docs/01 §3):
 	 * <pre>
 	 *   accessDate ≤ validUntil            the audit is still valid for this client
 	 *   accessDate ≤ reportNoLaterThan     the contractual ceiling is still met

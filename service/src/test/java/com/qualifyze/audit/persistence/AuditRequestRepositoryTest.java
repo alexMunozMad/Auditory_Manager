@@ -70,7 +70,7 @@ class AuditRequestRepositoryTest {
 				Instant.parse("2026-01-01T10:00:00Z"), 7, idempotencyKey);
 	}
 
-	/** A PENDING row with a controlled deadline — the window arithmetic is exercised elsewhere. */
+	/** A PENDING row with a controlled deadline - the window arithmetic is exercised elsewhere. */
 	private UUID insertPending(LocalDate earliest, LocalDate latest, String key) {
 		UUID id = UUID.randomUUID();
 		jdbc.sql("""

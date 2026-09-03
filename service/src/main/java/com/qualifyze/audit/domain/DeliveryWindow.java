@@ -7,7 +7,7 @@ import java.time.ZoneOffset;
 /**
  * The interval of admissible audit dates for one request, derived once from the subscription
  * level at acceptance and then frozen (docs/01 §4, docs/02 §3). Everything downstream only asks
- * whether a candidate date falls inside it — so if the "report no earlier than X" rule is ever
+ * whether a candidate date falls inside it - so if the "report no earlier than X" rule is ever
  * wrong, there is exactly one place to fix.
  *
  * <pre>

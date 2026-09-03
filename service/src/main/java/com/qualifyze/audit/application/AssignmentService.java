@@ -20,7 +20,7 @@ import java.util.UUID;
  * The assignment decision for one claimed request ({@code diagrams/worker-decision.mermaid}):
  *
  * <ol>
- *   <li>reuse — the site's in-flight audit (index 2, validity projected), then its current published
+ *   <li>reuse - the site's in-flight audit (index 2, validity projected), then its current published
  *       audit (index 3, real validity); attach if {@link AuditRequest#canReuse} (A7);</li>
  *   <li>otherwise schedule a new audit on the earliest free date in the window held by a
  *       {@link AuditorSelectionPolicy}-ranked auditor, floored at the previous audit's expiry (A7);</li>
