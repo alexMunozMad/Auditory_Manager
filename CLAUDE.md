@@ -27,9 +27,8 @@ Do not break these without the user's explicit approval **in the same message**.
    whether it should be one.
 8. **Every line defensible in one sentence**, or it does not go in.
 9. **Do not chase coverage.** JaCoCo is measured, not a target (`docs/06`).
-10. **Add files by explicit path.** These gitignored personal notes must never be staged:
-    `GUION_DEFENSA.md`, `99-defense-notes.md`, `QUALIFYZE_CONTEXT.md`,
-    `PLAN_2_DIAS_QUALIFYZE.md`, `BITACORA_TICKETS.md`.
+10. **Add files by explicit path** — never `git add -A` or `git add .`. Machine-local scratch
+    files are kept in `.git/info/exclude` (not the shared `.gitignore`) and must never be staged.
 11. **The design vocabulary is binding.** Request states are exactly `PENDING`, `SCHEDULED`,
     `FULFILLED`, `UNSCHEDULABLE`, `CANCELLED`. Audit states are exactly `SCHEDULED`, `IN_PROGRESS`,
     `PUBLISHED`, `DISCARDED`. Never `ATTACHED`, never `CANCELLED` on an audit. Table and column
