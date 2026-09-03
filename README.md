@@ -28,9 +28,13 @@ tenancy.
 2. **Assignment is asynchronous and single-writer.** Moving it off the request path turns a
    concurrency problem into a scheduling one: with one writer, proportional distribution is correct
    by construction — the contention on the workload figure disappears.
-3. **Business rules are enforced in the database.** The real races — the auditor calendar, the site
-   calendar — are arbitrated by unique indexes the application cannot bypass. The domain gives
-   useful errors; the database gives the guarantee.
+3. **The two rules that span rows are arbitrated by the database; every other rule is in the
+   domain.** A rule about one row (window arithmetic, the state machines, reuse eligibility) is
+   checked in the domain, which has no framework dependency. The two rules about the *relationship
+   between rows* — one auditor per site per day, one audit in flight per site — are unique indexes,
+   because only the database sees two concurrent transactions at once. The domain still checks them
+   first, for a clear error instead of a driver-level constraint violation: one layer is ergonomics,
+   the other is the guarantee (`docs/01 §3`).
 
 ## Documents
 

@@ -34,6 +34,28 @@ rule:
 These are arbitrated by unique indexes in the database, which see both transactions. A `version`
 column sees only one row and would not help.
 
+**Optimistic locking retries the *same* row after a version clash; the worker's retry tries a
+*different* candidate `(auditor, date)` after a `23505`.** They are not the same mechanism, and the
+second is the one this design needs (`diagrams/worker-decision.mermaid`).
+
+## Isolation level
+
+`READ COMMITTED` — the PostgreSQL default. Nothing raises it.
+
+- **The idempotency claim and the two placement races are enforced by unique indexes at the
+  physical level, not by snapshot isolation.** A unique violation is detected under `READ COMMITTED`
+  exactly as under `SERIALIZABLE`: the check sees the in-progress conflicting row and blocks, then
+  raises `23505` when the other transaction commits.
+- `FOR UPDATE SKIP LOCKED` on the claim query wants `READ COMMITTED` semantics — each statement
+  takes a fresh snapshot, so a worker sees rows another worker released since its transaction began.
+- `SERIALIZABLE` would add serialization-failure retries to every transaction for a guarantee the
+  indexes already give. `REPEATABLE READ` would make `SKIP LOCKED` see a stale snapshot of the
+  queue. Neither helps here.
+
+If assignment is ever sharded per site (the cost accepted below), the floor-at-previous-expiry read
+would need `SERIALIZABLE` *or* an explicit `FOR UPDATE` on the previous audit row — the same trigger
+that would add a `version` column.
+
 ## Options considered
 
 ### Option 1 · Add a `version` column to both tables
