@@ -7,7 +7,8 @@ level** — and publishes the resulting report.
 
 This repository is the **design** for one part of that problem, covered in depth (`docs/`), plus a
 slice of implementation as evidence (`service/` — Java 25, Spring Boot 4, `./mvnw test`, needs
-Docker for Testcontainers).
+Docker for Testcontainers). Running `TestAuditSchedulingApplication` starts the service with a
+Testcontainers PostgreSQL; Swagger UI is then at `http://localhost:8080/swagger-ui.html`.
 
 ## Scope
 
