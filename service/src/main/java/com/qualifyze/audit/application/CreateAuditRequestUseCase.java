@@ -20,18 +20,18 @@ import java.util.UUID;
  *
  * <p>Idempotency is claimed by the {@code audit_request_idempotency} unique index, not a
  * check-then-insert: {@link #execute} tries the write and reads the winner back only when the index
- * rejects it (docs/03 §3). This method is deliberately <em>not</em> {@code @Transactional} — the
+ * rejects it (docs/03 §3). This method is deliberately <em>not</em> {@code @Transactional}: the
  * failed insert's transaction must roll back cleanly before the follow-up read runs.
  */
 @Service
-public class CreateAuditRequest {
+public class CreateAuditRequestUseCase {
 
 	private final SiteRepository sites;
 	private final ClientRepository clients;
 	private final AuditRequestRepository requests;
 	private final Clock clock;
 
-	CreateAuditRequest(SiteRepository sites, ClientRepository clients,
+	CreateAuditRequestUseCase(SiteRepository sites, ClientRepository clients,
 			AuditRequestRepository requests, Clock clock) {
 		this.sites = sites;
 		this.clients = clients;
@@ -40,22 +40,37 @@ public class CreateAuditRequest {
 	}
 
 	public AuditRequest execute(CreateAuditRequestCommand command) {
-		ClientSubscription subscription = clients.findSubscription(command.clientId())
-				.orElseThrow(() -> new UnknownClientException(command.clientId()));
-
-		if (!sites.exists(command.siteId())) {
-			throw new SiteNotFoundException(command.siteId());
-		}
+		ClientSubscription subscription = resolveSubscription(command.clientId());
+		requireSiteExists(command.siteId());
 
 		Instant now = clock.instant();
-		if (!subscription.isActiveOn(now.atZone(ZoneOffset.UTC).toLocalDate())) {
-			throw new SubscriptionNotActiveException(command.clientId());
-		}
+		requireSubscriptionActive(subscription, now, command.clientId());
 
 		AuditRequest request = AuditRequest.accept(UUID.randomUUID(), command.clientId(),
 				command.siteId(), subscription.level(), now, Audit.DEFAULT_PROCESSING_DURATION_DAYS,
 				command.idempotencyKey());
 
+		return persistOrReplay(request, command);
+	}
+
+	private ClientSubscription resolveSubscription(UUID clientId) {
+		return clients.findSubscription(clientId)
+				.orElseThrow(() -> new UnknownClientException(clientId));
+	}
+
+	private void requireSiteExists(UUID siteId) {
+		if (!sites.exists(siteId)) {
+			throw new SiteNotFoundException(siteId);
+		}
+	}
+
+	private void requireSubscriptionActive(ClientSubscription subscription, Instant now, UUID clientId) {
+		if (!subscription.isActiveOn(now.atZone(ZoneOffset.UTC).toLocalDate())) {
+			throw new SubscriptionNotActiveException(clientId);
+		}
+	}
+
+	private AuditRequest persistOrReplay(AuditRequest request, CreateAuditRequestCommand command) {
 		try {
 			requests.save(request);
 			return request;

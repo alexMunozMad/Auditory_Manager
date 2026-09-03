@@ -23,12 +23,12 @@ import static org.mockito.BDDMockito.given;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
-class CreateAuditRequestTest {
+class CreateAuditRequestUseCaseTest {
 
 	private static final Instant NOW = Instant.parse("2026-01-01T10:00:00Z");
 
 	@Autowired
-	CreateAuditRequest createAuditRequest;
+	CreateAuditRequestUseCase createAuditRequest;
 
 	@Autowired
 	JdbcClient jdbc;
