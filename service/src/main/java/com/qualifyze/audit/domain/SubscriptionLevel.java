@@ -6,7 +6,7 @@ package com.qualifyze.audit.domain;
  * an {@code UPDATE} in production. {@code SubscriptionLevelTest} is that review gate.
  *
  * <p>When levels are negotiated per client the terms become data and this enum becomes the set
- * of defaults — not built (A6).
+ * of defaults - not built (A6).
  */
 public enum SubscriptionLevel {
 

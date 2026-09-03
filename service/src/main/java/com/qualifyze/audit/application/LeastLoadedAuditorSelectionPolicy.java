@@ -11,7 +11,7 @@ import java.util.UUID;
 /**
  * The default reading of A2 (docs/05 §5): the least-loaded eligible auditor over a rolling window,
  * ties broken by id for reproducibility. Load is a {@code COUNT} of non-discarded audits in the
- * window — never a stored counter, because a lifetime total cannot express a rolling window
+ * window - never a stored counter, because a lifetime total cannot express a rolling window
  * (docs/02 §7).
  */
 @Component

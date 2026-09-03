@@ -24,8 +24,8 @@ import java.net.URI;
  * (docs/03 §8). The {@code type} URI is the stable part of the contract clients branch on; the
  * {@code title} and {@code detail} text are free to change.
  *
- * <p>Extends {@link ResponseEntityExceptionHandler} so the framework's own request faults —
- * a missing header, an unreadable body — are shaped the same way, not left as Spring's default.
+ * <p>Extends {@link ResponseEntityExceptionHandler} so the framework's own request faults -
+ * a missing header, an unreadable body - are shaped the same way, not left as Spring's default.
  */
 @RestControllerAdvice
 class ApiExceptionHandler extends ResponseEntityExceptionHandler {

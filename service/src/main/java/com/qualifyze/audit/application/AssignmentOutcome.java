@@ -6,7 +6,7 @@ package com.qualifyze.audit.application;
  */
 public enum AssignmentOutcome {
 
-	/** Attached to the site's in-flight audit — projected validity met both A7 conditions. */
+	/** Attached to the site's in-flight audit - projected validity met both A7 conditions. */
 	REUSED_IN_FLIGHT,
 
 	/** Attached to the site's current published audit. */

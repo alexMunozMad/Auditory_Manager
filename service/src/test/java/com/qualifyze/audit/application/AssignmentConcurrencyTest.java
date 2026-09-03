@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.BDDMockito.given;
 
 /**
- * The concurrency proof (docs/05 §9, docs/06 §3) — the evidence shown in the defence.
+ * The concurrency proof (docs/05 §9, docs/06 §3) - the evidence shown in the defence.
  *
  * <p>Many requests for different sites, one shared subscription window, so every request competes
  * for the same early dates. Several worker threads drain the queue at once. Then the same run with
@@ -66,7 +66,7 @@ class AssignmentConcurrencyTest {
 		given(clock.getZone()).willReturn(ZoneOffset.UTC);
 
 		// the workload query and the placement search read every active auditor globally, so this
-		// test owns the whole pool — other classes' leftover auditors would dilute the contention.
+		// test owns the whole pool - other classes' leftover auditors would dilute the contention.
 		jdbc.sql("DELETE FROM audit_request").update();
 		jdbc.sql("DELETE FROM audit").update();
 		jdbc.sql("DELETE FROM outbox_event").update();
@@ -153,7 +153,7 @@ class AssignmentConcurrencyTest {
 		assertEquals(requestCount, scalar("SELECT count(*) FROM outbox_event WHERE event_type = 'AuditScheduled'"));
 		assertEquals(requestCount, scalar("SELECT count(*) FROM outbox_event WHERE event_type = 'AuditRequestScheduled'"));
 
-		// no auditor ran away with the batch — least-loaded keeps the spread tight
+		// no auditor ran away with the batch - least-loaded keeps the spread tight
 		long maxLoad = scalar("SELECT max(c) FROM (SELECT count(*) c FROM audit GROUP BY auditor_id) loads");
 		long minLoad = scalar("SELECT min(c) FROM (SELECT count(*) c FROM audit GROUP BY auditor_id) loads");
 		assertTrue(maxLoad - minLoad <= WORKER_THREADS,

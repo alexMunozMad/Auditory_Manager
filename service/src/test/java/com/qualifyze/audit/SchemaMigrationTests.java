@@ -24,7 +24,7 @@ class SchemaMigrationTests {
 	@Test
 	void contextLoadsWithMigrationsApplied() {
 		// If Liquibase failed, the Spring context would not start and this test would
-		// not run. This is the wiring proof — Testcontainers + Liquibase + Spring Boot —
+		// not run. This is the wiring proof - Testcontainers + Liquibase + Spring Boot -
 		// which is the real risk in the scaffolding ticket.
 	}
 
@@ -50,7 +50,7 @@ class SchemaMigrationTests {
 				.params(UUID.randomUUID(), siteA, auditor, day).update();
 
 		// Same auditor, same day, a different site: audit_one_per_auditor_per_day rejects
-		// it. The point isn't that the constraint is listed in the catalog — it's that a
+		// it. The point isn't that the constraint is listed in the catalog - it's that a
 		// second insert actually bounces, surfaced as a catchable DuplicateKeyException
 		// (ADR 0004), not a torn transaction.
 		assertThrows(DuplicateKeyException.class, () ->

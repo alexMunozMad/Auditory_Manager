@@ -3,7 +3,7 @@ package com.qualifyze.audit.application;
 import java.util.UUID;
 
 /**
- * The same {@code Idempotency-Key} came back with a different body (a different {@code siteId}) —
+ * The same {@code Idempotency-Key} came back with a different body (a different {@code siteId}) -
  * a client bug, not a retry (docs/03 §3 → 422 idempotency-key-reused). It must fail loudly rather
  * than serve the first request's response to a second, different intent.
  */

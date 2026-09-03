@@ -20,7 +20,7 @@ import java.util.UUID;
  *
  * <p>Idempotency is claimed by the {@code audit_request_idempotency} unique index, not a
  * check-then-insert: {@link #execute} tries the write and reads the winner back only when the index
- * rejects it (docs/03 §3). This method is deliberately <em>not</em> {@code @Transactional} — the
+ * rejects it (docs/03 §3). This method is deliberately <em>not</em> {@code @Transactional} - the
  * failed insert's transaction must roll back cleanly before the follow-up read runs.
  */
 @Service

@@ -10,7 +10,7 @@ import java.util.UUID;
 
 /**
  * What the client sees for one request (docs/03 §3). The frozen {@code earliest/latest_audit_date}
- * columns are projected into the client's vocabulary — report dates — by
+ * columns are projected into the client's vocabulary - report dates - by
  * {@link AuditRequest#reportCommitment(int)}. The audit itself is never named.
  *
  * @param expectedReportDate {@code available_to_client_at} once a slot exists; {@code null} while PENDING.

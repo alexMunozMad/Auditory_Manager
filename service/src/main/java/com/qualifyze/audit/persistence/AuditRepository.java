@@ -19,7 +19,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Persists {@link Audit} rows by hand ({@code JdbcClient}, no JPA — ADR 0004) and answers the reads
+ * Persists {@link Audit} rows by hand ({@code JdbcClient}, no JPA - ADR 0004) and answers the reads
  * the assignment worker needs: the two reuse candidates for a site (docs/02 §6), whether an auditor
  * is free on a date, and the active auditors ordered by rolling-window load (A2, docs/02 §7).
  */
@@ -55,12 +55,12 @@ public class AuditRepository {
 	/**
 	 * Write a newly scheduled audit and its {@code AuditScheduled} outbox row (A8, ADR 0002,
 	 * docs/04 §3). The two unique indexes ({@code audit_one_per_auditor_per_day},
-	 * {@code audit_one_in_flight_per_site}) are the guarantee — a lost race surfaces here as a
+	 * {@code audit_one_in_flight_per_site}) are the guarantee - a lost race surfaces here as a
 	 * {@code DuplicateKeyException}.
 	 *
 	 * <p>{@code NESTED}: each call runs in its own savepoint inside the worker's transaction, so a
 	 * rejected candidate rolls back to the savepoint and the worker retries the next one without
-	 * losing the transaction (ADR 0004 — Postgres aborts a transaction on any {@code 23505}).
+	 * losing the transaction (ADR 0004 - Postgres aborts a transaction on any {@code 23505}).
 	 */
 	@Transactional(propagation = Propagation.NESTED)
 	public void save(Audit audit) {
@@ -88,7 +88,7 @@ public class AuditRepository {
 	}
 
 	/**
-	 * The one possible in-flight audit for a site — {@code SCHEDULED} or {@code IN_PROGRESS}
+	 * The one possible in-flight audit for a site - {@code SCHEDULED} or {@code IN_PROGRESS}
 	 * (index 2, a partial <em>unique</em> index, so at most one). Its {@code valid_until} is still
 	 * {@code NULL}; the caller projects validity as {@code audit_date + processing + 1 year}.
 	 */
@@ -109,7 +109,7 @@ public class AuditRepository {
 	}
 
 	/**
-	 * Whether the auditor has no audit booked on that date. The ergonomic pre-check only — the
+	 * Whether the auditor has no audit booked on that date. The ergonomic pre-check only - the
 	 * guarantee is {@code UNIQUE (auditor_id, audit_date)}, which arbitrates the race this read
 	 * cannot see (docs/01 §3).
 	 */
@@ -123,7 +123,7 @@ public class AuditRepository {
 	/**
 	 * Active auditors, least-loaded first over the rolling window that starts at
 	 * {@code loadWindowStart}, ties broken by id for reproducibility (A2, docs/02 §7). The load is a
-	 * {@code COUNT} of non-discarded audits — never a stored counter, because a lifetime total cannot
+	 * {@code COUNT} of non-discarded audits - never a stored counter, because a lifetime total cannot
 	 * express a rolling window.
 	 */
 	public List<UUID> activeAuditorsByLoad(LocalDate loadWindowStart) {
@@ -143,7 +143,7 @@ public class AuditRepository {
 	}
 
 	/**
-	 * Every {@code (audit_date, auditor_id)} already taken in {@code [from, to]} — one read that feeds
+	 * Every {@code (audit_date, auditor_id)} already taken in {@code [from, to]} - one read that feeds
 	 * the placement search, so it does not query per candidate. Discarded audits release their slot.
 	 */
 	public Map<LocalDate, Set<UUID>> auditorsBookedBetween(LocalDate from, LocalDate to) {
